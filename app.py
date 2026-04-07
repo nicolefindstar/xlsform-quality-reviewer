@@ -1577,188 +1577,222 @@ class DesignAdvisor:
     # ── 3. Numeric fields without plausible bounds ────────────────────────────
 
     def _check_numeric_bounds(self):
+        age_vars = []; year_vars = []; count_vars = []; money_vars = []
         for q in self.questions:
             if q["type"].split()[0] not in ("integer", "decimal"):
                 continue
             name       = q["name"]
             constraint = q.get("constraint", "")
+            if   self._AGE_KWORDS.search(name)   and not constraint:
+                age_vars.append(name)
+            elif self._YEAR_KWORDS.search(name)  and not constraint:
+                year_vars.append(name)
+            elif self._COUNT_KWORDS.search(name) and (not constraint or ">=" not in constraint):
+                count_vars.append(name)
+            elif (self._INCOME_KWORDS.search(name) or self._EXPEND_KWORDS.search(name)) \
+                 and not constraint:
+                money_vars.append(name)
 
-            if self._AGE_KWORDS.search(name):
-                if not constraint:
-                    self._add(Suggestion(
-                        category="Validation",
-                        title="Age field without plausible bounds",
-                        description=(
-                            f"**{name}** appears to capture age but has no constraint. "
-                            "Without bounds, ages of 0, 999, or negative values will pass "
-                            "validation and require expensive cleaning later."
-                        ),
-                        action="Add a constraint to restrict implausible values:",
-                        example=". >= 0 and . <= 120",
-                        vars=[name],
-                        priority="High",
-                    ))
-
-            elif self._YEAR_KWORDS.search(name):
-                if not constraint:
-                    self._add(Suggestion(
-                        category="Validation",
-                        title="Year field without range constraint",
-                        description=(
-                            f"**{name}** appears to capture a year but has no constraint. "
-                            "Four-digit entry errors (e.g. 19, 20199) will be undetectable."
-                        ),
-                        action="Add a constraint with a plausible year range:",
-                        example=". >= 1900 and . <= 2025",
-                        vars=[name],
-                        priority="Medium",
-                    ))
-
-            elif self._COUNT_KWORDS.search(name):
-                if not constraint or ">=" not in constraint:
-                    self._add(Suggestion(
-                        category="Validation",
-                        title="Count field without non-negative constraint",
-                        description=(
-                            f"**{name}** appears to count people or items but does not "
-                            "prevent negative values."
-                        ),
-                        action="Add a non-negative constraint:",
-                        example=". >= 0",
-                        vars=[name],
-                        priority="Medium",
-                    ))
-
-            elif self._INCOME_KWORDS.search(name) or self._EXPEND_KWORDS.search(name):
-                if not constraint:
-                    self._add(Suggestion(
-                        category="Validation",
-                        title="Income / expenditure field without bounds",
-                        description=(
-                            f"**{name}** captures a monetary amount but has no constraint. "
-                            "Typos in large numbers (e.g. an extra zero) are a common data "
-                            "entry error and are hard to detect post-collection."
-                        ),
-                        action=(
-                            "Add a non-negative lower bound and consider a soft upper bound "
-                            "appropriate for your population. Use a `constraint_message` to "
-                            "prompt the enumerator to confirm unusually large values."
-                        ),
-                        example=". >= 0",
-                        vars=[name],
-                        priority="Medium",
-                    ))
+        if age_vars:
+            self._add(Suggestion(
+                category="Validation",
+                title="Age fields without plausible bounds",
+                description=(
+                    f"**{len(age_vars)} age field(s)** have no constraint. "
+                    "Without bounds, values of 0, 999, or negatives will pass validation "
+                    "and require expensive post-collection cleaning."
+                ),
+                action="Add a constraint to each to restrict implausible values:",
+                example=". >= 0 and . <= 120",
+                vars=age_vars, priority="High",
+            ))
+        if year_vars:
+            self._add(Suggestion(
+                category="Validation",
+                title="Year fields without range constraint",
+                description=(
+                    f"**{len(year_vars)} year field(s)** have no constraint. "
+                    "Four-digit entry errors (e.g. 19, 20199) will be undetectable."
+                ),
+                action="Add a constraint with a plausible year range:",
+                example=". >= 1900 and . <= 2025",
+                vars=year_vars, priority="Medium",
+            ))
+        if count_vars:
+            self._add(Suggestion(
+                category="Validation",
+                title="Count fields without non-negative constraint",
+                description=(
+                    f"**{len(count_vars)} count field(s)** (people, items, etc.) "
+                    "do not prevent negative values."
+                ),
+                action="Add a non-negative constraint:",
+                example=". >= 0",
+                vars=count_vars, priority="Medium",
+            ))
+        if money_vars:
+            self._add(Suggestion(
+                category="Validation",
+                title="Income / expenditure fields without bounds",
+                description=(
+                    f"**{len(money_vars)} monetary field(s)** have no constraint. "
+                    "Typos in large numbers (e.g. an extra zero) are a common data entry error "
+                    "and are difficult to detect post-collection."
+                ),
+                action=(
+                    "Add a non-negative lower bound and consider a soft upper bound "
+                    "appropriate for your population. Use a `constraint_message` to prompt "
+                    "the enumerator to confirm unusually large values."
+                ),
+                example=". >= 0",
+                vars=money_vars, priority="Medium",
+            ))
 
     # ── 4. Implicit follow-up questions without relevance conditions ──────────
 
     def _check_implicit_followups(self):
-        names = {q["name"] for q in self.questions}
+        names  = {q["name"] for q in self.questions}
+        hits   = []   # (field_name, stem, parent_exists)
         for q in self.questions:
             if q.get("relevant"):
                 continue
             if not self._FOLLOWUP_SUFFIX.search(q["name"]):
                 continue
-            # Try to find the likely parent question
             stem = self._FOLLOWUP_SUFFIX.sub("", q["name"])
-            parent_exists = stem in names
-            self._add(Suggestion(
-                category="Skip Logic",
-                title="Follow-up question without relevance condition",
-                description=(
-                    f"**{q['name']}** looks like a follow-up or 'specify other' question "
-                    f"{'(likely parent: `' + stem + '`)' if parent_exists else ''} "
-                    "but has no `relevant` condition. It will be displayed to every respondent "
-                    "regardless of their prior answer."
-                ),
-                action=(
-                    "Add a `relevant` condition so this question only appears when needed. "
-                    + (f"Example (assuming parent `{stem}` has an 'other' option):" if parent_exists else "Example:")
-                ),
-                example=(f"selected(${{stem}}, 'other')" if parent_exists else "selected(${parent}, 'other')").replace("stem", stem),
-                vars=[q["name"]],
-                priority="High",
-            ))
+            hits.append((q["name"], stem, stem in names))
+
+        if not hits:
+            return
+        # Emit one grouped suggestion; show one representative example
+        example_name, example_stem, example_parent = hits[0]
+        self._add(Suggestion(
+            category="Skip Logic",
+            title="Follow-up questions without a relevance condition",
+            description=(
+                f"**{len(hits)} question(s)** look like follow-ups or 'specify other' fields "
+                "(names ending in `_reason`, `_specify`, `_other`, etc.) but have no `relevant` "
+                "condition. They will be shown to every respondent regardless of prior answers."
+            ),
+            action=(
+                "Add a `relevant` condition to each so it only appears when needed. "
+                + (f"Example for `{example_name}` (parent `{example_stem}`):"
+                   if example_parent else "Example:")
+            ),
+            example=(
+                f"selected(${{{example_stem}}}, 'other')"
+                if example_parent else "selected(${parent_field}, 'other')"
+            ),
+            vars=[h[0] for h in hits],
+            priority="High",
+        ))
 
     # ── 5. Hint text coverage on complex questions ────────────────────────────
 
     def _check_hint_coverage(self):
         complex_types = {"integer", "decimal", "text", "date", "datetime"}
+        constrained_vars = []; sensitive_vars = []; long_label_vars = []
         for q in self.questions:
-            base = q["type"].split()[0]
-            if base not in complex_types:
+            if q["type"].split()[0] not in complex_types:
                 continue
             if q.get("hint"):
                 continue
-            has_constraint = bool(q.get("constraint"))
-            is_sensitive   = bool(self._SENSITIVE_KWORDS.search(q["name"])
-                                   or self._SENSITIVE_KWORDS.search(q.get("label", "")))
-            label_long     = len(q.get("label", "")) > 120
-            if not (has_constraint or is_sensitive or label_long):
-                continue
-            reason = (
-                "has a validation constraint" if has_constraint
-                else "appears sensitive" if is_sensitive
-                else "has a long label"
-            )
+            if q.get("constraint"):
+                constrained_vars.append(q["name"])
+            elif self._SENSITIVE_KWORDS.search(q["name"]) \
+                 or self._SENSITIVE_KWORDS.search(q.get("label", "")):
+                sensitive_vars.append(q["name"])
+            elif len(q.get("label", "")) > 120:
+                long_label_vars.append(q["name"])
+
+        if constrained_vars:
             self._add(Suggestion(
                 category="Enumerator Guidance",
-                title="Complex question without hint text",
+                title="Constrained fields without hint text",
                 description=(
-                    f"**{q['name']}** {reason} but provides no `hint` to the enumerator. "
-                    "Hints appear below the question on tablets and are an effective way to "
-                    "communicate valid ranges, units, or instructions without cluttering the label."
+                    f"**{len(constrained_vars)} field(s)** have a validation constraint but no "
+                    "`hint`. Hints appear below the question on tablets and are the recommended "
+                    "way to communicate valid ranges and units without cluttering the label."
                 ),
                 action=(
-                    "Add a `hint` column entry. For a constrained numeric field, specify the "
-                    "expected unit and range (e.g. 'Enter amount in local currency, 0–99999'). "
-                    "For sensitive questions, include a brief privacy assurance."
+                    "Add a `hint` specifying the expected unit and valid range "
+                    "(e.g. 'Enter amount in local currency, 0–99 999')."
                 ),
-                vars=[q["name"]],
-                priority="Low",
+                vars=constrained_vars, priority="Low",
+            ))
+        if sensitive_vars:
+            self._add(Suggestion(
+                category="Enumerator Guidance",
+                title="Sensitive fields without hint text",
+                description=(
+                    f"**{len(sensitive_vars)} field(s)** appear to cover sensitive topics "
+                    "(income, assets, health, religion, violence) but provide no `hint`. "
+                    "A brief privacy assurance in the hint reduces refusals."
+                ),
+                action=(
+                    "Add a `hint` with a privacy statement such as: "
+                    "'Your answers are confidential and will only be used for research purposes.'"
+                ),
+                vars=sensitive_vars, priority="Low",
+            ))
+        if long_label_vars:
+            self._add(Suggestion(
+                category="Enumerator Guidance",
+                title="Long-label fields without hint text",
+                description=(
+                    f"**{len(long_label_vars)} field(s)** have labels over 120 characters but "
+                    "no `hint`. Instructions, examples, and context should move to the hint "
+                    "field to keep labels concise on small screens."
+                ),
+                action=(
+                    "Move definitions, examples, and formatting instructions from the label "
+                    "into the `hint` column."
+                ),
+                vars=long_label_vars, priority="Low",
             ))
 
     # ── 6. Label quality ──────────────────────────────────────────────────────
 
     def _check_label_quality(self):
+        long_vars = []; double_vars = []
         for q in self.questions:
             label = q.get("label", "")
-            name  = q["name"]
             if not label:
                 continue
-            # Very long label
             if len(label) > 180:
-                self._add(Suggestion(
-                    category="Question Design",
-                    title="Excessively long question label",
-                    description=(
-                        f"**{name}** has a label of {len(label)} characters. "
-                        "On a tablet screen this may wrap across several lines and slow the "
-                        "interview, increasing enumerator fatigue and respondent drop-off."
-                    ),
-                    action=(
-                        "Shorten the label to the core question (≤150 chars). Move "
-                        "definitions, examples, and ranges into the `hint` field."
-                    ),
-                    vars=[name],
-                    priority="Low",
-                ))
-            # Possible double-barreled question
+                long_vars.append(q["name"])
             if " and " in label.lower() and label.strip().endswith("?"):
-                self._add(Suggestion(
-                    category="Question Design",
-                    title="Possible double-barreled question",
-                    description=(
-                        f"**{name}** contains 'and' within a question ending in '?'. "
-                        "Double-barreled questions ask about two things simultaneously, "
-                        "making responses ambiguous and difficult to interpret."
-                    ),
-                    action=(
-                        "Split into two separate questions, each asking about a single concept. "
-                        "If the second concept is conditional, add a relevance condition."
-                    ),
-                    vars=[name],
-                    priority="Medium",
-                ))
+                double_vars.append(q["name"])
+
+        if long_vars:
+            self._add(Suggestion(
+                category="Question Design",
+                title="Excessively long question labels",
+                description=(
+                    f"**{len(long_vars)} question(s)** have labels over 180 characters. "
+                    "On a tablet screen these wrap across several lines, slowing interviews "
+                    "and increasing enumerator fatigue."
+                ),
+                action=(
+                    "Shorten labels to the core question (≤150 chars). Move definitions, "
+                    "examples, and valid ranges into the `hint` field."
+                ),
+                vars=long_vars, priority="Low",
+            ))
+        if double_vars:
+            self._add(Suggestion(
+                category="Question Design",
+                title="Possible double-barreled questions",
+                description=(
+                    f"**{len(double_vars)} question(s)** contain 'and' within a label ending "
+                    "in '?'. Double-barreled questions ask about two things simultaneously, "
+                    "making responses ambiguous and difficult to interpret."
+                ),
+                action=(
+                    "Split each into two separate questions, each asking about a single concept. "
+                    "Use a relevance condition on the second if it is conditional on the first."
+                ),
+                vars=double_vars, priority="Medium",
+            ))
 
     # ── 7. Likert scale balance ───────────────────────────────────────────────
 
@@ -2006,53 +2040,58 @@ class DesignAdvisor:
     # ── 14. Required fields without required_message ──────────────────────────
 
     def _check_required_without_message(self):
+        affected = []
         for q in self.questions:
             if q.get("required", "").lower() not in ("yes", "true", "1"):
                 continue
             if q.get("required_message"):
                 continue
-            # Only flag answerable non-structural types
             base = q["type"].split()[0]
             if base in XLSFormParser.STRUCTURAL or base in ("note", "calculate"):
                 continue
+            affected.append(q["name"])
+        if affected:
             self._add(Suggestion(
                 category="Enumerator Guidance",
-                title="Required field without a required_message",
+                title="Required fields without a required_message",
                 description=(
-                    f"**{q['name']}** is marked required but has no `required_message`. "
+                    f"**{len(affected)} required field(s)** have no `required_message`. "
                     "When the enumerator tries to advance without answering, SurveyCTO shows "
-                    "a generic 'This field is required' prompt that gives no context."
+                    "a generic 'This field is required' prompt that gives no context about "
+                    "what to do next."
                 ),
                 action=(
-                    "Add a `required_message` that explains why the field is mandatory "
-                    "and what the enumerator should do (e.g. 'This question must be answered. "
-                    "If the respondent refuses, select Prefer not to answer.')."
+                    "Add a `required_message` column entry for each field explaining why it "
+                    "is mandatory and what to do if the respondent refuses "
+                    "(e.g. 'This question must be answered. If the respondent refuses, "
+                    "select Prefer not to answer.')."
                 ),
-                vars=[q["name"]],
+                vars=affected,
                 priority="Low",
             ))
 
     # ── 15. Read-only fields without a default ────────────────────────────────
 
     def _check_readonly_without_default(self):
-        for q in self.questions:
-            if q.get("read_only", "").lower() not in ("yes", "true", "1"):
-                continue
-            if q.get("default") or q.get("calculation"):
-                continue
+        affected = [
+            q["name"] for q in self.questions
+            if q.get("read_only", "").lower() in ("yes", "true", "1")
+            and not q.get("default") and not q.get("calculation")
+        ]
+        if affected:
             self._add(Suggestion(
                 category="Skip Logic",
-                title="Read-only field with no default or calculation",
+                title="Read-only fields with no default or calculation",
                 description=(
-                    f"**{q['name']}** is marked `read_only` but has neither a `default` "
-                    "value nor a `calculation`. The field will always be blank and "
-                    "uneditable — it will display nothing to the enumerator."
+                    f"**{len(affected)} field(s)** are marked `read_only` but have neither "
+                    "a `default` value nor a `calculation`. They will always be blank and "
+                    "uneditable — displaying nothing to the enumerator."
                 ),
                 action=(
-                    "Either add a `default` value or a `calculation` expression to populate "
-                    "the field, or remove the `read_only` flag if editing is intended."
+                    "Add a `default` value or `calculation` expression to populate each field, "
+                    "or remove the `read_only` flag if editing is intended."
                 ),
-                vars=[q["name"]],
+                vars=affected,
                 priority="Medium",
             ))
 
@@ -2061,33 +2100,33 @@ class DesignAdvisor:
     def _check_calculate_once(self):
         """Static calculations (no variable references) should use once() to avoid
         re-evaluation every time any field changes."""
-        ref_re = re.compile(r"\$\{[^}]+\}")
+        ref_re   = re.compile(r"\$\{[^}]+\}")
+        affected = []
         for q in self.questions:
             if q["type"] != "calculate":
                 continue
             calc = q.get("calculation", "")
             if not calc:
                 continue
-            # Skip if already uses once() or today()/now()
             if "once(" in calc or "today()" in calc or "now()" in calc or "random()" in calc:
                 continue
-            # If the expression contains no variable references, it's purely static
             if not ref_re.search(calc) and len(calc) > 3:
-                self._add(Suggestion(
-                    category="Performance",
-                    title="Static calculate field not wrapped in once()",
-                    description=(
-                        f"**{q['name']}** is a `calculate` field whose expression "
-                        f"`{calc[:80]}{'…' if len(calc) > 80 else ''}` contains no variable "
-                        "references. SurveyCTO re-evaluates all calculations every time any "
-                        "field changes, so static calculations add unnecessary overhead. "
-                        "Wrapping in `once()` evaluates the expression only at first load."
-                    ),
-                    action="Wrap the expression with `once()` to prevent repeated evaluation:",
-                    example=f"once({calc[:60]}{'…)' if len(calc) > 60 else ')'}",
-                    vars=[q["name"]],
-                    priority="Low",
-                ))
+                affected.append(q["name"])
+        if affected:
+            self._add(Suggestion(
+                category="Performance",
+                title="Static calculate fields not wrapped in once()",
+                description=(
+                    f"**{len(affected)} `calculate` field(s)** contain no variable references "
+                    "but are not wrapped in `once()`. SurveyCTO re-evaluates every calculation "
+                    "each time any field changes, so static expressions add unnecessary overhead. "
+                    "`once()` evaluates the expression exactly once at form load."
+                ),
+                action="Wrap each static expression with `once()` to prevent repeated evaluation:",
+                example="once('static_value_or_expression')",
+                vars=affected,
+                priority="Low",
+            ))
 
     # ── 17. pulldata() without type conversion ────────────────────────────────
 
@@ -2161,28 +2200,28 @@ class DesignAdvisor:
     # ── 19. GPS fields without accuracy parameters ────────────────────────────
 
     def _check_geopoint_accuracy(self):
-        for q in self.questions:
-            if q["type"].split()[0] != "geopoint":
-                continue
-            params = q.get("parameters", "")
-            if "capture-accuracy" in params or "accuracy" in params:
-                continue
+        affected = [
+            q["name"] for q in self.questions
+            if q["type"].split()[0] == "geopoint"
+            and "accuracy" not in q.get("parameters", "")
+        ]
+        if affected:
             self._add(Suggestion(
                 category="Data Quality",
-                title="GPS field without accuracy threshold",
+                title="GPS fields without accuracy threshold",
                 description=(
-                    f"**{q['name']}** collects GPS coordinates but does not set "
-                    "`capture-accuracy` or `warning-accuracy` parameters. Without these, "
-                    "the form will accept any GPS reading regardless of precision, "
+                    f"**{len(affected)} geopoint field(s)** collect GPS coordinates but do "
+                    "not set `capture-accuracy` or `warning-accuracy` parameters. Without "
+                    "these, the form will accept any GPS reading regardless of precision, "
                     "potentially recording locations accurate only to hundreds of metres."
                 ),
                 action=(
-                    "Add accuracy parameters in the `parameters` column. "
-                    "`capture-accuracy` sets the required precision before the point is "
-                    "recorded; `warning-accuracy` shows a warning but allows submission:"
+                    "Add accuracy parameters in the `parameters` column for each geopoint field. "
+                    "`capture-accuracy` sets the required precision (metres) before the point "
+                    "is recorded; `warning-accuracy` shows a warning but allows submission:"
                 ),
                 example="capture-accuracy=10 warning-accuracy=25",
-                vars=[q["name"]],
+                vars=affected,
                 priority="Medium",
             ))
 
@@ -2281,31 +2320,30 @@ class DesignAdvisor:
             r"\b(describe|explain|comment|reason|feedback|opinion|suggest|detail|"
             r"specify|elaborate|note|other|additional)\b", re.I
         )
-        for q in self.questions:
-            if q["type"] != "text":
-                continue
-            if "multiline" in q.get("appearance", ""):
-                continue
-            label = q.get("label", "")
-            name  = q["name"]
-            if open_ended.search(label) or open_ended.search(name):
-                self._add(Suggestion(
-                    category="Enumerator Guidance",
-                    title="Open-ended text field without multiline appearance",
-                    description=(
-                        f"**{name}** appears to invite a long or free-text response "
-                        "(label/name suggests: describe, explain, specify, etc.) but uses "
-                        "a single-line text input by default. On mobile devices this is "
-                        "uncomfortable for long answers and may discourage complete responses."
-                    ),
-                    action=(
-                        "Set `appearance = multiline` in the survey sheet to expand the "
-                        "input box and allow comfortable multi-line entry."
-                    ),
-                    example="appearance: multiline",
-                    vars=[name],
-                    priority="Low",
-                ))
+        affected = [
+            q["name"] for q in self.questions
+            if q["type"] == "text"
+            and "multiline" not in q.get("appearance", "")
+            and (open_ended.search(q.get("label", "")) or open_ended.search(q["name"]))
+        ]
+        if affected:
+            self._add(Suggestion(
+                category="Enumerator Guidance",
+                title="Open-ended text fields without multiline appearance",
+                description=(
+                    f"**{len(affected)} text field(s)** appear to invite long or free-text "
+                    "responses (label/name contains: describe, explain, specify, comment, etc.) "
+                    "but use a single-line input by default. On mobile devices this is "
+                    "uncomfortable and may discourage complete responses."
+                ),
+                action=(
+                    "Set `appearance = multiline` in the survey sheet for each field to "
+                    "expand the input box and allow comfortable multi-line entry."
+                ),
+                example="appearance: multiline",
+                vars=affected,
+                priority="Low",
+            ))
 
     # ── 23. Very large choice lists → CSV ─────────────────────────────────────
 
