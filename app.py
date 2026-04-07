@@ -1367,6 +1367,618 @@ class IssueDetector:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DESIGN ADVISOR  (applied economics / social science best practices)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Suggestion:
+    """A design improvement recommendation (not an error, but a best-practice hint)."""
+    __slots__ = ("category", "title", "description", "action", "example", "vars", "priority")
+    PRI_ORDER  = {"High": 0, "Medium": 1, "Low": 2}
+
+    def __init__(self, category, title, description, action, vars=None,
+                 priority="Medium", example=""):
+        self.category    = category
+        self.title       = title
+        self.description = description
+        self.action      = action
+        self.example     = example
+        self.vars        = vars or []
+        self.priority    = priority
+
+
+class DesignAdvisor:
+    """
+    Analyses parsed XLSForm questions and returns design improvement suggestions
+    grounded in applied economics / social science survey methodology.
+    Distinct from the StaticAnalyzer — these are not errors but opportunities
+    to improve data quality, reduce non-response, and strengthen skip logic.
+    """
+
+    # Patterns that suggest a choice is meant to be exclusive
+    _EXCLUSIVE_NAMES = re.compile(
+        r"^(dk|don[t']?_?know|refuse[d]?|na|n_a|not_applicable|none|no_response"
+        r"|prefer_not|no_answer|idk|unknown|refused|noanswer|no_opinion|not_sure)$",
+        re.I,
+    )
+    _EXCLUSIVE_LABELS = re.compile(
+        r"\b(don[''']?t know|do not know|refuse[d]?|not applicable|none of the above"
+        r"|prefer not to answer|no response|no opinion|not sure|unsure)\b",
+        re.I,
+    )
+
+    # Field-name keywords that suggest sensitive / numeric domains
+    _AGE_KWORDS       = re.compile(r"\b(age|yrs?|years?_old|age_hh)\b", re.I)
+    _YEAR_KWORDS      = re.compile(r"\b(year|yr|dob|birth_year|year_born)\b", re.I)
+    _INCOME_KWORDS    = re.compile(r"\b(income|wage|salary|earn|revenue|profit|remit|transfer)\b", re.I)
+    _EXPEND_KWORDS    = re.compile(r"\b(expend|spend|cost|payment|price|amount|value|asset)\b", re.I)
+    _COUNT_KWORDS     = re.compile(r"\b(num_|n_|count_|total_|number_of_|hh_size|hhsize|members)\b", re.I)
+    _SENSITIVE_KWORDS = re.compile(r"\b(income|wage|asset|wealth|religion|ethnic|politi|hiv|sex|violence)\b", re.I)
+    _FOLLOWUP_SUFFIX  = re.compile(r"_(reason|specify|detail|explain|other_text|other_spec|comment|other)$", re.I)
+    _LIKERT_LABELS    = re.compile(
+        r"\b(strongly agree|agree|neutral|disagree|strongly disagree"
+        r"|always|often|sometimes|rarely|never"
+        r"|very (good|bad|satisfied|dissatisfied|likely|unlikely|important|concerned)"
+        r"|extremely|very much|somewhat|not at all)\b",
+        re.I,
+    )
+
+    def __init__(self, parser: XLSFormParser):
+        self.parser      = parser
+        self.questions   = parser.answerable_questions()
+        self.choices     = parser.choices_dict
+        self._sugg: list = []
+        self._seen: set  = set()
+
+    # ── public ────────────────────────────────────────────────────────────────
+
+    def analyze_all(self) -> list:
+        self._check_exclusive_choice_constraints()
+        self._check_missing_dk_on_sensitive()
+        self._check_numeric_bounds()
+        self._check_implicit_followups()
+        self._check_hint_coverage()
+        self._check_label_quality()
+        self._check_likert_balance()
+        self._check_audit_trail()
+        self._check_section_notes()
+        self._check_large_choice_lists()
+        self._check_repeat_candidates()
+        return sorted(self._sugg, key=lambda s: Suggestion.PRI_ORDER.get(s.priority, 1))
+
+    # ── internal helpers ──────────────────────────────────────────────────────
+
+    def _add(self, s: Suggestion):
+        key = (s.category, s.title, tuple(sorted(s.vars)))
+        if key not in self._seen:
+            self._seen.add(key)
+            self._sugg.append(s)
+
+    # ── 1. Exclusive-choice constraints on select_multiple ────────────────────
+
+    def _check_exclusive_choice_constraints(self):
+        for q in self.questions:
+            if not q["type"].startswith("select_multiple"):
+                continue
+            choices    = q["choices"]
+            constraint = q.get("constraint", "")
+            excl = [
+                c for c in choices
+                if self._EXCLUSIVE_NAMES.match(c)
+                or any(self._EXCLUSIVE_LABELS.search(lbl)
+                       for lbl in self._choice_labels(q["list_name"]))
+            ]
+            # Deduplicate: keep only choices whose name matches
+            excl = [c for c in choices if self._EXCLUSIVE_NAMES.match(c)]
+            if not excl:
+                continue
+            # Check whether any existing constraint already guards these options
+            already_guarded = any(e in constraint for e in excl)
+            if already_guarded:
+                continue
+            names_str = " / ".join(f"`{e}`" for e in excl)
+            self._add(Suggestion(
+                category="Choice Logic",
+                title="Exclusive option selected alongside other responses",
+                description=(
+                    f"**{q['name']}** is a `select_multiple` question containing "
+                    f"exclusive option(s) {names_str} (e.g. 'Don't know', 'None', 'Refuse'). "
+                    "Without a constraint, respondents can select these alongside substantive "
+                    "answers, producing contradictory data."
+                ),
+                action=(
+                    "Add a `constraint` that prevents co-selection. "
+                    f"Example for option `{excl[0]}`:"
+                ),
+                example=(
+                    f"not(selected(., '{excl[0]}')) or count-selected(.) = 1"
+                ),
+                vars=[q["name"]],
+                priority="High",
+            ))
+
+    # ── 2. Sensitive questions without refusal options ────────────────────────
+
+    def _check_missing_dk_on_sensitive(self):
+        for q in self.questions:
+            base = q["type"].split()[0]
+            if base not in ("select_one", "select_multiple"):
+                continue
+            if not self._SENSITIVE_KWORDS.search(q["name"]) and \
+               not self._SENSITIVE_KWORDS.search(q.get("label", "")):
+                continue
+            choices = q["choices"]
+            has_dk = any(self._EXCLUSIVE_NAMES.match(c) for c in choices)
+            if has_dk:
+                continue
+            self._add(Suggestion(
+                category="Respondent Experience",
+                title="Sensitive question missing 'Prefer not to answer' option",
+                description=(
+                    f"**{q['name']}** appears to ask about a sensitive topic "
+                    "(income, assets, religion, ethnicity, health, or violence) "
+                    "but has no 'Don't know' or 'Prefer not to answer' choice. "
+                    "Omitting this option forces a response or causes item non-response."
+                ),
+                action=(
+                    "Add a choice (e.g. `prefer_not_to_answer`) to the choice list "
+                    f"`{q['list_name']}`, labelled 'Prefer not to answer' or 'Refuse'."
+                ),
+                vars=[q["name"]],
+                priority="Medium",
+            ))
+
+    # ── 3. Numeric fields without plausible bounds ────────────────────────────
+
+    def _check_numeric_bounds(self):
+        for q in self.questions:
+            if q["type"].split()[0] not in ("integer", "decimal"):
+                continue
+            name       = q["name"]
+            constraint = q.get("constraint", "")
+
+            if self._AGE_KWORDS.search(name):
+                if not constraint:
+                    self._add(Suggestion(
+                        category="Validation",
+                        title="Age field without plausible bounds",
+                        description=(
+                            f"**{name}** appears to capture age but has no constraint. "
+                            "Without bounds, ages of 0, 999, or negative values will pass "
+                            "validation and require expensive cleaning later."
+                        ),
+                        action="Add a constraint to restrict implausible values:",
+                        example=". >= 0 and . <= 120",
+                        vars=[name],
+                        priority="High",
+                    ))
+
+            elif self._YEAR_KWORDS.search(name):
+                if not constraint:
+                    self._add(Suggestion(
+                        category="Validation",
+                        title="Year field without range constraint",
+                        description=(
+                            f"**{name}** appears to capture a year but has no constraint. "
+                            "Four-digit entry errors (e.g. 19, 20199) will be undetectable."
+                        ),
+                        action="Add a constraint with a plausible year range:",
+                        example=". >= 1900 and . <= 2025",
+                        vars=[name],
+                        priority="Medium",
+                    ))
+
+            elif self._COUNT_KWORDS.search(name):
+                if not constraint or ">=" not in constraint:
+                    self._add(Suggestion(
+                        category="Validation",
+                        title="Count field without non-negative constraint",
+                        description=(
+                            f"**{name}** appears to count people or items but does not "
+                            "prevent negative values."
+                        ),
+                        action="Add a non-negative constraint:",
+                        example=". >= 0",
+                        vars=[name],
+                        priority="Medium",
+                    ))
+
+            elif self._INCOME_KWORDS.search(name) or self._EXPEND_KWORDS.search(name):
+                if not constraint:
+                    self._add(Suggestion(
+                        category="Validation",
+                        title="Income / expenditure field without bounds",
+                        description=(
+                            f"**{name}** captures a monetary amount but has no constraint. "
+                            "Typos in large numbers (e.g. an extra zero) are a common data "
+                            "entry error and are hard to detect post-collection."
+                        ),
+                        action=(
+                            "Add a non-negative lower bound and consider a soft upper bound "
+                            "appropriate for your population. Use a `constraint_message` to "
+                            "prompt the enumerator to confirm unusually large values."
+                        ),
+                        example=". >= 0",
+                        vars=[name],
+                        priority="Medium",
+                    ))
+
+    # ── 4. Implicit follow-up questions without relevance conditions ──────────
+
+    def _check_implicit_followups(self):
+        names = {q["name"] for q in self.questions}
+        for q in self.questions:
+            if q.get("relevant"):
+                continue
+            if not self._FOLLOWUP_SUFFIX.search(q["name"]):
+                continue
+            # Try to find the likely parent question
+            stem = self._FOLLOWUP_SUFFIX.sub("", q["name"])
+            parent_exists = stem in names
+            self._add(Suggestion(
+                category="Skip Logic",
+                title="Follow-up question without relevance condition",
+                description=(
+                    f"**{q['name']}** looks like a follow-up or 'specify other' question "
+                    f"{'(likely parent: `' + stem + '`)' if parent_exists else ''} "
+                    "but has no `relevant` condition. It will be displayed to every respondent "
+                    "regardless of their prior answer."
+                ),
+                action=(
+                    "Add a `relevant` condition so this question only appears when needed. "
+                    + (f"Example (assuming parent `{stem}` has an 'other' option):" if parent_exists else "Example:")
+                ),
+                example=(f"selected(${{stem}}, 'other')" if parent_exists else "selected(${parent}, 'other')").replace("stem", stem),
+                vars=[q["name"]],
+                priority="High",
+            ))
+
+    # ── 5. Hint text coverage on complex questions ────────────────────────────
+
+    def _check_hint_coverage(self):
+        complex_types = {"integer", "decimal", "text", "date", "datetime"}
+        for q in self.questions:
+            base = q["type"].split()[0]
+            if base not in complex_types:
+                continue
+            if q.get("hint"):
+                continue
+            has_constraint = bool(q.get("constraint"))
+            is_sensitive   = bool(self._SENSITIVE_KWORDS.search(q["name"])
+                                   or self._SENSITIVE_KWORDS.search(q.get("label", "")))
+            label_long     = len(q.get("label", "")) > 120
+            if not (has_constraint or is_sensitive or label_long):
+                continue
+            reason = (
+                "has a validation constraint" if has_constraint
+                else "appears sensitive" if is_sensitive
+                else "has a long label"
+            )
+            self._add(Suggestion(
+                category="Enumerator Guidance",
+                title="Complex question without hint text",
+                description=(
+                    f"**{q['name']}** {reason} but provides no `hint` to the enumerator. "
+                    "Hints appear below the question on tablets and are an effective way to "
+                    "communicate valid ranges, units, or instructions without cluttering the label."
+                ),
+                action=(
+                    "Add a `hint` column entry. For a constrained numeric field, specify the "
+                    "expected unit and range (e.g. 'Enter amount in local currency, 0–99999'). "
+                    "For sensitive questions, include a brief privacy assurance."
+                ),
+                vars=[q["name"]],
+                priority="Low",
+            ))
+
+    # ── 6. Label quality ──────────────────────────────────────────────────────
+
+    def _check_label_quality(self):
+        for q in self.questions:
+            label = q.get("label", "")
+            name  = q["name"]
+            if not label:
+                continue
+            # Very long label
+            if len(label) > 180:
+                self._add(Suggestion(
+                    category="Question Design",
+                    title="Excessively long question label",
+                    description=(
+                        f"**{name}** has a label of {len(label)} characters. "
+                        "On a tablet screen this may wrap across several lines and slow the "
+                        "interview, increasing enumerator fatigue and respondent drop-off."
+                    ),
+                    action=(
+                        "Shorten the label to the core question (≤150 chars). Move "
+                        "definitions, examples, and ranges into the `hint` field."
+                    ),
+                    vars=[name],
+                    priority="Low",
+                ))
+            # Possible double-barreled question
+            if " and " in label.lower() and label.strip().endswith("?"):
+                self._add(Suggestion(
+                    category="Question Design",
+                    title="Possible double-barreled question",
+                    description=(
+                        f"**{name}** contains 'and' within a question ending in '?'. "
+                        "Double-barreled questions ask about two things simultaneously, "
+                        "making responses ambiguous and difficult to interpret."
+                    ),
+                    action=(
+                        "Split into two separate questions, each asking about a single concept. "
+                        "If the second concept is conditional, add a relevance condition."
+                    ),
+                    vars=[name],
+                    priority="Medium",
+                ))
+
+    # ── 7. Likert scale balance ───────────────────────────────────────────────
+
+    def _check_likert_balance(self):
+        checked_lists = set()
+        for q in self.questions:
+            ln = q.get("list_name")
+            if not ln or ln in checked_lists:
+                continue
+            choices = self.choices.get(ln, [])
+            if len(choices) < 3:
+                continue
+            # Get labels for these choices
+            labels_text = " | ".join(self._choice_labels(ln))
+            if not self._LIKERT_LABELS.search(labels_text):
+                continue
+            checked_lists.add(ln)
+            # Count positive vs negative poles
+            positive = len(re.findall(
+                r"\b(agree|always|good|satisfied|likely|important|positive|yes|often)\b",
+                labels_text, re.I))
+            negative = len(re.findall(
+                r"\b(disagree|never|bad|dissatisfied|unlikely|unimportant|negative|no|rarely)\b",
+                labels_text, re.I))
+            if positive > 0 and negative == 0:
+                self._add(Suggestion(
+                    category="Question Design",
+                    title="Likert scale may lack negative pole",
+                    description=(
+                        f"Choice list **{ln}** appears to be a Likert-type scale but may be "
+                        "missing a negative pole (e.g. 'Disagree', 'Never', 'Dissatisfied'). "
+                        "Unbalanced scales introduce acquiescence bias — respondents tend to "
+                        "select positive options when negatives are unavailable."
+                    ),
+                    action=(
+                        "Ensure the scale has symmetric positive and negative options around "
+                        "a neutral midpoint (e.g. Strongly Agree / Agree / Neutral / "
+                        "Disagree / Strongly Disagree)."
+                    ),
+                    vars=[q2["name"] for q2 in self.questions if q2.get("list_name") == ln],
+                    priority="Medium",
+                ))
+
+    # ── 8. Audit / paradata fields ────────────────────────────────────────────
+
+    def _check_audit_trail(self):
+        all_names = [q["name"] for q in self.questions]
+        all_types = [q["type"] for q in self.parser.questions]
+        has_audit = any("audit" in t for t in all_types)
+        if not has_audit:
+            self._add(Suggestion(
+                category="Data Quality",
+                title="No audit field for interview timing",
+                description=(
+                    "The form does not include an `audit` field. SurveyCTO's audit log "
+                    "records time spent on each question, GPS track of the interview, and "
+                    "back-navigation events — all useful for detecting enumerator fabrication "
+                    "and identifying slow/confusing questions."
+                ),
+                action=(
+                    "Add a row in the survey sheet with `type = audit` and a name "
+                    "(e.g. `audit`). No label is needed. This adds negligible burden "
+                    "and significantly strengthens high-frequency checks."
+                ),
+                example="type: audit    name: audit",
+                vars=[],
+                priority="Low",
+            ))
+
+    # ── 9. Section context notes ──────────────────────────────────────────────
+
+    def _check_section_notes(self):
+        questions_only = [q for q in self.parser.questions
+                          if q["type"].split()[0] not in XLSFormParser.STRUCTURAL]
+        if len(questions_only) < 10:
+            return
+        # Find stretches of non-note questions longer than 15
+        streak = 0
+        long_blocks = []
+        block_start = None
+        for q in questions_only:
+            if q["type"] == "note":
+                streak = 0
+                block_start = None
+            else:
+                if streak == 0:
+                    block_start = q["name"]
+                streak += 1
+                if streak == 15:
+                    long_blocks.append(block_start)
+        if long_blocks:
+            self._add(Suggestion(
+                category="Survey Flow",
+                title="Long question blocks without section notes",
+                description=(
+                    f"The form contains blocks of 15 or more consecutive questions with no "
+                    f"`note` row to provide context or section transitions. "
+                    f"First such block starts near **{long_blocks[0]}**. "
+                    "Enumerators benefit from brief notes that signal topic changes, "
+                    "provide module-level instructions, or re-establish rapport."
+                ),
+                action=(
+                    "Insert `note` rows at module boundaries (e.g. 'Now I will ask you "
+                    "about household income.') and before sensitive sections with a brief "
+                    "privacy assurance."
+                ),
+                vars=long_blocks[:3],
+                priority="Low",
+            ))
+
+    # ── 10. Oversized choice lists ────────────────────────────────────────────
+
+    def _check_large_choice_lists(self):
+        for q in self.questions:
+            ln = q.get("list_name")
+            if not ln:
+                continue
+            choices = self.choices.get(ln, [])
+            if len(choices) < 20:
+                continue
+            appearance = q.get("appearance", "")
+            if "search" in appearance or "autocomplete" in appearance:
+                continue
+            self._add(Suggestion(
+                category="Efficiency",
+                title="Large choice list without autocomplete appearance",
+                description=(
+                    f"**{q['name']}** uses choice list `{ln}` with {len(choices)} options. "
+                    "Scrolling through a long list is slow and error-prone on tablets. "
+                    "SurveyCTO supports a searchable dropdown that narrows options as "
+                    "the enumerator types."
+                ),
+                action=(
+                    "Set `appearance = search` (SurveyCTO) or `autocomplete` (ODK) in the "
+                    "survey sheet for this question to enable a filtered dropdown."
+                ),
+                example=f"appearance: search",
+                vars=[q["name"]],
+                priority="Medium",
+            ))
+
+    # ── 11. Repeat-group candidates ───────────────────────────────────────────
+
+    def _check_repeat_candidates(self):
+        """Flag groups of similarly-named questions that suggest a roster pattern."""
+        from collections import defaultdict
+        stem_map = defaultdict(list)
+        suffix_re = re.compile(r"_(\d+)$")
+        for q in self.questions:
+            m = suffix_re.search(q["name"])
+            if m:
+                stem = q["name"][:m.start()]
+                stem_map[stem].append(q["name"])
+        for stem, members in stem_map.items():
+            if len(members) >= 4:
+                self._add(Suggestion(
+                    category="Efficiency",
+                    title="Repeated numbered questions — consider a repeat group",
+                    description=(
+                        f"Found {len(members)} questions with the pattern `{stem}_N` "
+                        f"({', '.join(members[:4])}{'…' if len(members) > 4 else ''}). "
+                        "This pattern often indicates a roster that is hard-coded as individual "
+                        "questions, which makes the form inflexible and hard to maintain."
+                    ),
+                    action=(
+                        f"Replace `{stem}_1` … `{stem}_{len(members)}` with a single question "
+                        f"inside a `begin repeat` / `end repeat` block. Set the repeat count "
+                        "using a prior count question (e.g. household size)."
+                    ),
+                    vars=members[:6],
+                    priority="Medium",
+                ))
+
+    # ── choice-label lookup ───────────────────────────────────────────────────
+
+    def _choice_labels(self, list_name: str) -> list:
+        if self.parser.choices_df is None or not list_name:
+            return []
+        df = self.parser.choices_df
+        mask = df.get("list_name", pd.Series(dtype=str)) == list_name
+        labels = []
+        for col in df.columns:
+            if col == "label" or col.startswith("label:"):
+                vals = df.loc[mask, col].dropna().astype(str).tolist()
+                labels.extend(vals)
+        return labels
+
+
+# ── UI helper: render suggestion cards ───────────────────────────────────────
+
+_PRI_COLOR = {
+    "High":   ("#cc9470", "#fdf5ee"),
+    "Medium": ("#ccb460", "#fdf8e8"),
+    "Low":    ("#6aab90", "#e8f6f0"),
+}
+
+_CAT_ICON = {
+    "Choice Logic":         "🔘",
+    "Respondent Experience":"🤝",
+    "Validation":           "🔢",
+    "Skip Logic":           "↪️",
+    "Enumerator Guidance":  "💬",
+    "Question Design":      "✏️",
+    "Data Quality":         "📊",
+    "Survey Flow":          "📋",
+    "Efficiency":           "⚡",
+}
+
+
+def _show_suggestions(suggestions: list):
+    if not suggestions:
+        st.success("✅ No design improvement suggestions — the form follows best practices in all checked areas.")
+        return
+
+    by_cat = {}
+    for s in suggestions:
+        by_cat.setdefault(s.category, []).append(s)
+
+    pri_counts = Counter(s.priority for s in suggestions)
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    sc1.metric("Total Suggestions", len(suggestions),
+               help="Design improvement opportunities identified. These are not errors — the form will work — but addressing them can improve data quality, reduce non-response, and simplify data cleaning.")
+    sc2.metric("⬆ High Priority",   pri_counts.get("High", 0),
+               help="Suggestions with a strong potential impact on data quality or respondent experience.")
+    sc3.metric("— Medium Priority", pri_counts.get("Medium", 0),
+               help="Worthwhile improvements that carry moderate impact.")
+    sc4.metric("⬇ Low Priority",    pri_counts.get("Low", 0),
+               help="Minor refinements and nice-to-have enhancements.")
+
+    st.markdown("")
+
+    for cat, items in sorted(by_cat.items()):
+        icon = _CAT_ICON.get(cat, "📌")
+        with st.expander(f"{icon} **{cat}** — {len(items)} suggestion{'s' if len(items) != 1 else ''}", expanded=True):
+            for s in items:
+                fg, bg = _PRI_COLOR.get(s.priority, ("#64748b", "#f8fafc"))
+                vars_html = ""
+                if s.vars:
+                    chips = "".join(f'<code style="background:#f1f5f9;padding:.1rem .35rem;border-radius:3px;font-size:.78rem;margin:1px 2px">{v}</code>' for v in s.vars[:8])
+                    more  = f'<span style="color:#94a3b8;font-size:.78rem"> +{len(s.vars)-8} more</span>' if len(s.vars) > 8 else ""
+                    vars_html = f'<div style="margin-top:.4rem">{chips}{more}</div>'
+                example_html = ""
+                if s.example:
+                    example_html = (
+                        f'<div style="margin-top:.5rem;background:#f1f5f9;padding:.4rem .7rem;'
+                        f'border-radius:5px;font-family:monospace;font-size:.82rem;color:#1e293b">'
+                        f'{html_module.escape(s.example)}</div>'
+                    )
+                st.markdown(
+                    f'<div style="border:1px solid {bg};border-left:4px solid {fg};'
+                    f'border-radius:6px;padding:.8rem 1rem;margin-bottom:.7rem;background:white">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+                    f'<b style="font-size:.92rem">{s.title}</b>'
+                    f'<span style="background:{bg};color:{fg};font-size:.68rem;font-weight:700;'
+                    f'padding:.2rem .55rem;border-radius:12px;white-space:nowrap;margin-left:.5rem">'
+                    f'{s.priority}</span></div>'
+                    f'<div style="font-size:.87rem;color:#334155;margin-top:.35rem;line-height:1.55">'
+                    f'{s.description}</div>'
+                    f'<div style="font-size:.84rem;color:#64748b;margin-top:.4rem">'
+                    f'<b>Suggested action:</b> {s.action}</div>'
+                    f'{example_html}{vars_html}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # HTML REPORT GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1948,6 +2560,22 @@ def main():
                     for i, (p, c) in enumerate(sig_counts.most_common(10))
                 ])
                 st.dataframe(top, hide_index=True, use_container_width=True)
+
+    # ── Design Advisor ────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("💡 Design Improvement Suggestions")
+    st.markdown(
+        "Recommendations grounded in **applied economics and social science survey methodology**. "
+        "These are not errors — the form will function as written — but addressing them can "
+        "improve data quality, reduce item non-response, and simplify downstream cleaning. "
+        "Checks cover exclusive-choice constraints, numeric validation bounds, implicit follow-up "
+        "logic, hint coverage, label quality, Likert scale balance, and survey flow efficiency."
+    )
+
+    with st.spinner("Analysing design…"):
+        suggestions = DesignAdvisor(parser).analyze_all()
+
+    _show_suggestions(suggestions)
 
     # ── Report export ─────────────────────────────────────────────────────────
     st.divider()
