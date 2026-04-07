@@ -422,11 +422,14 @@ def build_pdf():
         styles["body_j"]
     ))
     story.append(Paragraph(
-        "The tool performs two complementary types of analysis: a <b>structural inspection</b> "
-        "that examines the form's design without executing it, and a <b>simulation-based analysis</b> "
+        "The tool performs three complementary types of analysis: a <b>structural inspection</b> "
+        "that examines the form's design without executing it; a <b>simulation-based analysis</b> "
         "that runs hundreds of synthetic respondents through the form to expose logic errors that "
-        "structural inspection alone cannot detect. Results are presented in an interactive "
-        "web interface and can be exported as a formatted HTML report.",
+        "structural inspection alone cannot detect; and a <b>design advisor</b> that evaluates the "
+        "form against applied economics and social science survey methodology best practices, "
+        "returning prioritised improvement suggestions grounded in the XLSForm specification and "
+        "SurveyCTO documentation. Results are presented in an interactive web interface and "
+        "can be exported as a formatted HTML report.",
         styles["body_j"]
     ))
     story.append(sp(4))
@@ -462,21 +465,25 @@ def build_pdf():
          "duplicate field names, missing labels, outdated syntax, and more."),
         ("🎲", "Respondent Path Simulation",
          "Generates realistic synthetic respondents with correlated demographic profiles and "
-         "response style archetypes. Runs them through the form to detect unreachable questions, "
-         "broken skip chains, and logic conditions that never fire."),
-        ("📊", "Severity Classification",
-         "Every issue is classified as Critical, High, Medium, or Low severity, enabling "
-         "teams to prioritise corrections effectively before training and deployment."),
+         "response style archetypes (neutral, agreeable, cautious, extreme). Runs them through "
+         "the form to detect unreachable questions, broken skip chains, and logic conditions "
+         "that never fire across diverse respondent profiles."),
+        ("💡", "Design Improvement Suggestions",
+         "Evaluates the form against applied economics and social science survey methodology "
+         "best practices. Returns 24 prioritised checks across 13 categories: reference integrity, "
+         "choice logic, validation bounds, skip logic, performance, multilingual completeness, "
+         "GPS accuracy, form metadata, and more — grounded in the XLSForm spec and SurveyCTO docs."),
         ("📋", "Exportable Quality Report",
          "Generates a self-contained HTML report with a metrics dashboard, issue breakdown "
-         "charts, and a grouped issues table with remediation guidance for each problem type."),
+         "charts, and grouped issue tables with remediation guidance for each problem type. "
+         "Suitable for sharing with colleagues or archiving as pre-registration documentation."),
         ("🔒", "Local & Offline Operation",
          "The application runs entirely on the user's machine. No data is transmitted to any "
-         "external server at any point. The tool operates fully offline once installed."),
-        ("⚡", "Grouped Issue Table",
-         "Issues sharing the same root cause are consolidated into a single row, listing all "
-         "affected variables together. This eliminates repetitive output and makes large forms "
-         "significantly easier to review."),
+         "external server at any point. Safe for sensitive survey instruments and restricted data."),
+        ("📊", "Severity & Priority Classification",
+         "Structural and simulation issues are classified as Critical / High / Medium / Low. "
+         "Design suggestions carry High / Medium / Low priority ratings. Every finding includes "
+         "a plain-language explanation and a concrete, copy-ready fix."),
     ]
 
     for i in range(0, len(features), 2):
@@ -513,13 +520,14 @@ def build_pdf():
     # — Standards
     story.append(Paragraph("Quality Standards", styles["h2"]))
     story.append(Paragraph(
-        "Checks are derived from two widely adopted quality assurance frameworks for "
-        "household survey instruments:",
+        "Structural checks are derived from two widely adopted quality assurance frameworks "
+        "for household survey instruments. Design suggestions are grounded in the XLSForm "
+        "specification and SurveyCTO form design documentation.",
         styles["body"]
     ))
     story.append(sp(4))
     story.append(data_table(
-        ["Framework", "Institution", "What it covers"],
+        ["Source", "Institution / Publisher", "Scope"],
         [
             ["ietestform.ado",
              "World Bank DIME Analytics",
@@ -529,6 +537,14 @@ def build_pdf():
              "Innovations for Poverty Action (IPA)",
              "Metadata fields, disabled/read-only flags, required field logic, "
              "or_other syntax, integer constraints, duplicate codes"],
+            ["XLSForm Specification",
+             "XLSForm.org (ODK / KoBoToolbox)",
+             "Field types, column definitions, skip logic syntax, choice list rules, "
+             "appearance options, repeat groups, multilingual forms"],
+            ["SurveyCTO Form Design Docs",
+             "Dobility / SurveyCTO",
+             "Performance limits, pulldata() best practices, GPS accuracy parameters, "
+             "repeat group sizing, calculate field optimisation, form version management"],
         ],
         [42 * mm, 46 * mm, PAGE_W - 2 * MARGIN - 88 * mm],
         styles,
@@ -540,21 +556,27 @@ def build_pdf():
     steps_intro = [
         ("1", "Install the application",
          "Follow the platform-specific setup instructions in this guide (Section 2). "
-         "Installation is required only once."),
+         "Installation is required only once; subsequent launches use the provided "
+         "one-click launcher script."),
         ("2", "Launch the application",
          "Start the app using the provided launcher script or the terminal command. "
          "The tool opens in your web browser at http://localhost:8501."),
         ("3", "Upload your XLSForm",
          "Click the upload area and select your .xlsx file. The tool will immediately "
-         "parse the form and display summary statistics."),
+         "parse the survey and choices sheets, detect languages, and display summary statistics."),
         ("4", "Review structural issues",
          "Structural checks run automatically on upload. Review issues grouped by "
-         "severity — Critical and High issues should be resolved before proceeding."),
+         "severity — Critical and High issues should be resolved before proceeding to "
+         "simulation or field testing."),
         ("5", "Run respondent simulations",
          "Configure the number of simulations (50–100 recommended) and click Run. "
-         "The tool will simulate respondents with diverse profiles and report any "
-         "logic issues detected across their paths."),
-        ("6", "Export the quality report",
+         "The tool generates synthetic respondents with realistic demographic profiles and "
+         "response styles, then reports unreachable questions and broken skip chains."),
+        ("6", "Review design suggestions",
+         "Scroll to the Design Improvement Suggestions section for prioritised best-practice "
+         "recommendations grounded in the XLSForm specification and SurveyCTO documentation. "
+         "Each suggestion includes a ready-to-apply fix example."),
+        ("7", "Export the quality report",
          "Download the HTML report for documentation, sharing with colleagues, "
          "or archiving as part of the study's pre-registration materials."),
     ]
