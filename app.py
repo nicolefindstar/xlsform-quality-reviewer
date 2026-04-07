@@ -1503,49 +1503,43 @@ class DesignAdvisor:
     # ── 1. Exclusive-choice constraints on select_multiple ────────────────────
 
     def _check_exclusive_choice_constraints(self):
+        hits = []   # (field_name, [exclusive_choice_names])
         for q in self.questions:
             if not q["type"].startswith("select_multiple"):
                 continue
             choices    = q["choices"]
             constraint = q.get("constraint", "")
-            excl = [
-                c for c in choices
-                if self._EXCLUSIVE_NAMES.match(c)
-                or any(self._EXCLUSIVE_LABELS.search(lbl)
-                       for lbl in self._choice_labels(q["list_name"]))
-            ]
-            # Deduplicate: keep only choices whose name matches
             excl = [c for c in choices if self._EXCLUSIVE_NAMES.match(c)]
             if not excl:
                 continue
-            # Check whether any existing constraint already guards these options
-            already_guarded = any(e in constraint for e in excl)
-            if already_guarded:
+            if any(e in constraint for e in excl):
                 continue
-            names_str = " / ".join(f"`{e}`" for e in excl)
-            self._add(Suggestion(
-                category="Choice Logic",
-                title="Exclusive option selected alongside other responses",
-                description=(
-                    f"**{q['name']}** is a `select_multiple` question containing "
-                    f"exclusive option(s) {names_str} (e.g. 'Don't know', 'None', 'Refuse'). "
-                    "Without a constraint, respondents can select these alongside substantive "
-                    "answers, producing contradictory data."
-                ),
-                action=(
-                    "Add a `constraint` that prevents co-selection. "
-                    f"Example for option `{excl[0]}`:"
-                ),
-                example=(
-                    f"not(selected(., '{excl[0]}')) or count-selected(.) = 1"
-                ),
-                vars=[q["name"]],
-                priority="High",
-            ))
+            hits.append((q["name"], excl))
+
+        if not hits:
+            return
+        example_field, example_excl = hits[0]
+        self._add(Suggestion(
+            category="Choice Logic",
+            title=f"Exclusive options selectable alongside other responses ({len(hits)} fields)",
+            description=(
+                f"**{len(hits)} `select_multiple` field(s)** contain exclusive option(s) such as "
+                "'Don't know', 'None', or 'Refuse' but have no constraint preventing them from "
+                "being selected alongside substantive answers. This produces contradictory data."
+            ),
+            action=(
+                "Add a `constraint` to each field that prevents co-selection. "
+                f"Example for `{example_field}` (option `{example_excl[0]}`):"
+            ),
+            example=f"not(selected(., '{example_excl[0]}')) or count-selected(.) = 1",
+            vars=[h[0] for h in hits],
+            priority="High",
+        ))
 
     # ── 2. Sensitive questions without refusal options ────────────────────────
 
     def _check_missing_dk_on_sensitive(self):
+        affected = []
         for q in self.questions:
             base = q["type"].split()[0]
             if base not in ("select_one", "select_multiple"):
@@ -1553,24 +1547,25 @@ class DesignAdvisor:
             if not self._SENSITIVE_KWORDS.search(q["name"]) and \
                not self._SENSITIVE_KWORDS.search(q.get("label", "")):
                 continue
-            choices = q["choices"]
-            has_dk = any(self._EXCLUSIVE_NAMES.match(c) for c in choices)
-            if has_dk:
+            if any(self._EXCLUSIVE_NAMES.match(c) for c in q["choices"]):
                 continue
+            affected.append(q["name"])
+
+        if affected:
             self._add(Suggestion(
                 category="Respondent Experience",
-                title="Sensitive question missing 'Prefer not to answer' option",
+                title=f"Sensitive questions missing 'Prefer not to answer' option ({len(affected)} fields)",
                 description=(
-                    f"**{q['name']}** appears to ask about a sensitive topic "
-                    "(income, assets, religion, ethnicity, health, or violence) "
-                    "but has no 'Don't know' or 'Prefer not to answer' choice. "
-                    "Omitting this option forces a response or causes item non-response."
+                    f"**{len(affected)} question(s)** appear to cover sensitive topics "
+                    "(income, assets, religion, ethnicity, health, or violence) but have no "
+                    "'Don't know' or 'Prefer not to answer' choice. Omitting this option "
+                    "forces a response or causes item non-response."
                 ),
                 action=(
-                    "Add a choice (e.g. `prefer_not_to_answer`) to the choice list "
-                    f"`{q['list_name']}`, labelled 'Prefer not to answer' or 'Refuse'."
+                    "Add a choice (e.g. `prefer_not_to_answer`, labelled "
+                    "'Prefer not to answer') to each relevant choice list."
                 ),
-                vars=[q["name"]],
+                vars=affected,
                 priority="Medium",
             ))
 
@@ -1798,19 +1793,18 @@ class DesignAdvisor:
 
     def _check_likert_balance(self):
         checked_lists = set()
+        unbalanced_lists = []   # list_name
+        all_affected_vars = []
         for q in self.questions:
             ln = q.get("list_name")
             if not ln or ln in checked_lists:
                 continue
-            choices = self.choices.get(ln, [])
-            if len(choices) < 3:
+            if len(self.choices.get(ln, [])) < 3:
                 continue
-            # Get labels for these choices
             labels_text = " | ".join(self._choice_labels(ln))
             if not self._LIKERT_LABELS.search(labels_text):
                 continue
             checked_lists.add(ln)
-            # Count positive vs negative poles
             positive = len(re.findall(
                 r"\b(agree|always|good|satisfied|likely|important|positive|yes|often)\b",
                 labels_text, re.I))
@@ -1818,23 +1812,29 @@ class DesignAdvisor:
                 r"\b(disagree|never|bad|dissatisfied|unlikely|unimportant|negative|no|rarely)\b",
                 labels_text, re.I))
             if positive > 0 and negative == 0:
-                self._add(Suggestion(
-                    category="Question Design",
-                    title="Likert scale may lack negative pole",
-                    description=(
-                        f"Choice list **{ln}** appears to be a Likert-type scale but may be "
-                        "missing a negative pole (e.g. 'Disagree', 'Never', 'Dissatisfied'). "
-                        "Unbalanced scales introduce acquiescence bias — respondents tend to "
-                        "select positive options when negatives are unavailable."
-                    ),
-                    action=(
-                        "Ensure the scale has symmetric positive and negative options around "
-                        "a neutral midpoint (e.g. Strongly Agree / Agree / Neutral / "
-                        "Disagree / Strongly Disagree)."
-                    ),
-                    vars=[q2["name"] for q2 in self.questions if q2.get("list_name") == ln],
-                    priority="Medium",
-                ))
+                unbalanced_lists.append(ln)
+                all_affected_vars += [q2["name"] for q2 in self.questions if q2.get("list_name") == ln]
+
+        if unbalanced_lists:
+            lists_str = ", ".join(f"`{ln}`" for ln in unbalanced_lists[:5]) + \
+                        ("…" if len(unbalanced_lists) > 5 else "")
+            self._add(Suggestion(
+                category="Question Design",
+                title=f"Likert scales missing a negative pole ({len(unbalanced_lists)} choice list(s))",
+                description=(
+                    f"**{len(unbalanced_lists)} choice list(s)** appear to be Likert-type scales "
+                    f"but may be missing a negative pole ({lists_str}). "
+                    "Unbalanced scales introduce acquiescence bias — respondents tend to select "
+                    "positive options when negatives are unavailable."
+                ),
+                action=(
+                    "Ensure each scale has symmetric positive and negative options around a "
+                    "neutral midpoint (e.g. Strongly Agree / Agree / Neutral / Disagree / "
+                    "Strongly Disagree)."
+                ),
+                vars=all_affected_vars[:10],
+                priority="Medium",
+            ))
 
     # ── 8. Audit / paradata fields ────────────────────────────────────────────
 
@@ -1992,10 +1992,10 @@ class DesignAdvisor:
 
     def _check_broken_variable_references(self):
         """Detect ${varname} refs in relevance/constraint/calculation that don't exist."""
-        defined = {q["name"] for q in self.parser.questions if q.get("name")}
-        ref_re  = re.compile(r"\$\{([^}]+)\}")
+        defined     = {q["name"] for q in self.parser.questions if q.get("name")}
+        ref_re      = re.compile(r"\$\{([^}]+)\}")
         expr_fields = ("relevant", "constraint", "calculation", "default")
-        broken_by_var: dict = {}   # undefined_name → [(field, col)]
+        broken_by_var: dict = {}   # undefined_name → set of field names that use it
 
         for q in self.parser.questions:
             for col in expr_fields:
@@ -2005,33 +2005,43 @@ class DesignAdvisor:
                 for m in ref_re.finditer(expr):
                     ref = m.group(1).strip()
                     if ref not in defined:
-                        broken_by_var.setdefault(ref, []).append((q["name"], col))
+                        broken_by_var.setdefault(ref, set()).add(q["name"])
 
-        for ref, usages in broken_by_var.items():
-            affected = list({u[0] for u in usages})
-            cols_used = list({u[1] for u in usages})
-            self._add(Suggestion(
-                category="Reference Integrity",
-                title=f"Undefined variable reference: ${{{ref}}}",
-                description=(
-                    f"The expression `${{{ref}}}` appears in the `{'`, `'.join(cols_used)}` "
-                    f"column(s) of {len(affected)} field(s) but `{ref}` is not defined anywhere "
-                    "in the survey sheet. This is almost certainly a typo and will cause the "
-                    "condition to silently fail — the question may always show or always hide."
-                ),
-                action=(
-                    f"Check whether `{ref}` is a misspelling of an existing field name. "
-                    "Correct the reference or add the missing field."
-                ),
-                vars=affected[:8],
-                priority="High",
-            ))
+        if not broken_by_var:
+            return
+
+        # One grouped card listing all broken references
+        ref_summary = ", ".join(
+            f"`${{{ref}}}` (used in {len(fields)} field(s))"
+            for ref, fields in sorted(broken_by_var.items(), key=lambda x: -len(x[1]))[:8]
+        ) + ("…" if len(broken_by_var) > 8 else "")
+        all_affected = list({f for fields in broken_by_var.values() for f in fields})
+
+        self._add(Suggestion(
+            category="Reference Integrity",
+            title=f"Undefined variable references — likely typos ({len(broken_by_var)} distinct ref(s))",
+            description=(
+                f"**{len(broken_by_var)} variable reference(s)** appear in relevance, "
+                "constraint, or calculation expressions but are not defined anywhere in the "
+                "survey sheet. These are almost certainly typos — conditions will silently "
+                f"fail and questions may always show or always hide. References: {ref_summary}."
+            ),
+            action=(
+                "Search the survey sheet for each undefined name and correct the spelling, "
+                "or add the missing field. Common causes: renamed variables, copy-paste errors, "
+                "and case mismatches (names are case-sensitive)."
+            ),
+            vars=all_affected[:10],
+            priority="High",
+        ))
 
     # ── 13. select_multiple choice names with spaces ──────────────────────────
 
     def _check_select_multiple_space_names(self):
         """Choice names containing spaces break select_multiple response parsing."""
-        seen_lists = set()
+        seen_lists   = set()
+        bad_lists    = []   # (list_name, [bad_choice_names])
+        all_fields   = []
         for q in self.questions:
             if not q["type"].startswith("select_multiple"):
                 continue
@@ -2041,23 +2051,30 @@ class DesignAdvisor:
             seen_lists.add(ln)
             bad = [c for c in self.choices.get(ln, []) if " " in c]
             if bad:
-                self._add(Suggestion(
-                    category="Reference Integrity",
-                    title="Choice names with spaces in a select_multiple list",
-                    description=(
-                        f"Choice list **{ln}** (used by `select_multiple`) contains choice "
-                        f"name(s) with spaces: {', '.join(f'`{b}`' for b in bad[:5])}. "
-                        "XLSForm stores multi-select responses as space-separated values, so "
-                        "a choice name with a space will be split into two tokens during analysis, "
-                        "corrupting the data silently."
-                    ),
-                    action=(
-                        "Replace spaces in choice names with underscores "
-                        "(e.g. `crop type` → `crop_type`). Labels can still contain spaces."
-                    ),
-                    vars=[q2["name"] for q2 in self.questions if q2.get("list_name") == ln],
-                    priority="High",
-                ))
+                bad_lists.append((ln, bad))
+                all_fields += [q2["name"] for q2 in self.questions if q2.get("list_name") == ln]
+
+        if bad_lists:
+            summary = "; ".join(
+                f"`{ln}`: {', '.join(f'`{b}`' for b in bad[:3])}{'…' if len(bad) > 3 else ''}"
+                for ln, bad in bad_lists[:4]
+            )
+            self._add(Suggestion(
+                category="Reference Integrity",
+                title=f"Choice names with spaces in select_multiple lists ({len(bad_lists)} list(s))",
+                description=(
+                    f"**{len(bad_lists)} choice list(s)** used by `select_multiple` questions "
+                    "contain choice names with spaces. XLSForm stores multi-select responses as "
+                    "space-separated values, so a space in a name silently corrupts the data. "
+                    f"Affected: {summary}."
+                ),
+                action=(
+                    "Replace all spaces in choice names with underscores "
+                    "(e.g. `crop type` → `crop_type`). Labels can still contain spaces."
+                ),
+                vars=all_fields[:10],
+                priority="High",
+            ))
 
     # ── 14. Required fields without required_message ──────────────────────────
 
@@ -2155,39 +2172,39 @@ class DesignAdvisor:
     def _check_pulldata_type_conversion(self):
         """pulldata() returns text strings; arithmetic on them requires int()/number()."""
         arith_re = re.compile(r"pulldata\s*\(", re.I)
-        math_ops  = re.compile(r"[\+\-\*\/]|div\b|mod\b|>=|<=|>|<", re.I)
-        for q in self.questions:
-            calc = q.get("calculation", "") or q.get("constraint", "")
-            if not calc:
-                continue
-            if not arith_re.search(calc):
-                continue
-            # Check if pulldata result is used in arithmetic without wrapping
-            if math_ops.search(calc) and "int(" not in calc and "number(" not in calc:
-                self._add(Suggestion(
-                    category="Reference Integrity",
-                    title="pulldata() result used in arithmetic without type conversion",
-                    description=(
-                        f"**{q['name']}** uses `pulldata()` alongside arithmetic operators "
-                        "but does not convert the result with `int()` or `number()`. "
-                        "`pulldata()` always returns a text string; using it directly in "
-                        "arithmetic will silently produce empty or NaN results in SurveyCTO."
-                    ),
-                    action=(
-                        "Wrap the `pulldata()` call with `int()` or `number()` before "
-                        "performing arithmetic:"
-                    ),
-                    example="int(pulldata('dataset', 'col', 'key_col', ${keyfield}))",
-                    vars=[q["name"]],
-                    priority="High",
-                ))
+        math_ops = re.compile(r"[\+\-\*\/]|div\b|mod\b|>=|<=|>|<", re.I)
+        affected = [
+            q["name"] for q in self.questions
+            if (q.get("calculation", "") or q.get("constraint", ""))
+            and arith_re.search(q.get("calculation", "") or q.get("constraint", ""))
+            and math_ops.search(q.get("calculation", "") or q.get("constraint", ""))
+            and "int(" not in (q.get("calculation", "") or q.get("constraint", ""))
+            and "number(" not in (q.get("calculation", "") or q.get("constraint", ""))
+        ]
+        if affected:
+            self._add(Suggestion(
+                category="Reference Integrity",
+                title=f"pulldata() results used in arithmetic without type conversion ({len(affected)} fields)",
+                description=(
+                    f"**{len(affected)} field(s)** use `pulldata()` alongside arithmetic "
+                    "operators but do not convert the result with `int()` or `number()`. "
+                    "`pulldata()` always returns a text string; using it directly in arithmetic "
+                    "silently produces empty or NaN results in SurveyCTO."
+                ),
+                action=(
+                    "Wrap each `pulldata()` call with `int()` or `number()` before arithmetic:"
+                ),
+                example="int(pulldata('dataset', 'col', 'key_col', ${keyfield}))",
+                vars=affected,
+                priority="High",
+            ))
 
     # ── 18. Likert questions without randomized appearance ────────────────────
 
     def _check_likert_appearance(self):
-        """Opinion/attitude Likert questions should randomize choice order to
-        reduce primacy/recency and acquiescence bias."""
+        """Opinion/attitude Likert questions should randomize choice order."""
         checked_lists = set()
+        all_affected  = []
         for q in self.questions:
             ln = q.get("list_name")
             if not ln or ln in checked_lists:
@@ -2196,26 +2213,27 @@ class DesignAdvisor:
             if not self._LIKERT_LABELS.search(labels_text):
                 continue
             checked_lists.add(ln)
-            appearance = q.get("appearance", "")
-            if "randomized" in appearance or "likert" in appearance:
+            if "randomized" in q.get("appearance", "") or "likert" in q.get("appearance", ""):
                 continue
-            affected = [q2["name"] for q2 in self.questions if q2.get("list_name") == ln]
+            all_affected += [q2["name"] for q2 in self.questions if q2.get("list_name") == ln]
+
+        if all_affected:
             self._add(Suggestion(
                 category="Question Design",
-                title="Likert/attitude scale without randomized choice order",
+                title=f"Likert/attitude scales without randomized choice order ({len(all_affected)} fields)",
                 description=(
-                    f"Questions using choice list **{ln}** appear to use a Likert or "
-                    "attitude scale but have no `randomized` appearance. Presenting response "
-                    "options in a fixed order introduces primacy bias (first option selected "
-                    "more often) and recency bias, affecting cross-respondent comparability."
+                    f"**{len(all_affected)} field(s)** use Likert or attitude scales but have no "
+                    "`randomized` appearance. A fixed option order introduces primacy bias "
+                    "(first option selected more often) and recency bias, affecting "
+                    "cross-respondent comparability."
                 ),
                 action=(
-                    "Add `randomized` to the `appearance` column for these questions. "
+                    "Add `randomized` to the `appearance` column for each field. "
                     "If 'Other' or 'Don't know' must stay at the bottom, use "
                     "`randomized(0, 1)` to exclude the last choice from randomization:"
                 ),
                 example="randomized(0, 1)",
-                vars=affected[:6],
+                vars=all_affected[:10],
                 priority="Medium",
             ))
 
@@ -2370,7 +2388,8 @@ class DesignAdvisor:
     # ── 23. Very large choice lists → CSV ─────────────────────────────────────
 
     def _check_very_large_choice_csv(self):
-        seen = set()
+        seen     = set()
+        hits     = []   # (list_name, count, [field_names])
         for q in self.questions:
             ln = q.get("list_name")
             if not ln or ln in seen:
@@ -2379,24 +2398,32 @@ class DesignAdvisor:
             count = len(self.choices.get(ln, []))
             if count < 200:
                 continue
-            self._add(Suggestion(
-                category="Performance",
-                title=f"Choice list with {count} options should be a CSV dataset",
-                description=(
-                    f"Choice list **{ln}** has {count} options stored on the choices sheet. "
-                    "SurveyCTO loads all choices into device memory when the form opens. "
-                    "Lists of this size significantly slow form loading and navigation, "
-                    "and are a documented cause of app crashes on low-end Android devices."
-                ),
-                action=(
-                    "Move this choice list to a pre-loaded CSV dataset and use "
-                    "`select_one_from_file` or a `search()` expression with `pulldata()`. "
-                    "Also set `appearance = search` to enable filtering as the enumerator types."
-                ),
-                example=f"type: select_one_from_file {ln}.csv",
-                vars=[q2["name"] for q2 in self.questions if q2.get("list_name") == ln],
-                priority="High",
-            ))
+            fields = [q2["name"] for q2 in self.questions if q2.get("list_name") == ln]
+            hits.append((ln, count, fields))
+
+        if not hits:
+            return
+        hits.sort(key=lambda x: -x[1])
+        summary = "; ".join(f"`{ln}` ({count} options)" for ln, count, _ in hits[:5]) + \
+                  ("…" if len(hits) > 5 else "")
+        all_fields = [f for _, _, fields in hits for f in fields]
+        self._add(Suggestion(
+            category="Performance",
+            title=f"Very large choice lists should be moved to CSV files ({len(hits)} list(s))",
+            description=(
+                f"**{len(hits)} choice list(s)** with 200 or more options are stored on the "
+                "choices sheet. SurveyCTO loads all choices into device memory at form open — "
+                "lists this size slow loading and navigation and can crash low-end Android devices. "
+                f"Lists: {summary}."
+            ),
+            action=(
+                "Move each large list to a pre-loaded CSV dataset and use `select_one_from_file` "
+                "or `search()` with `pulldata()`. Set `appearance = search` to enable filtering."
+            ),
+            example="type: select_one_from_file my_list.csv",
+            vars=all_fields[:10],
+            priority="High",
+        ))
 
     # ── 24. Form complexity / performance warnings ────────────────────────────
 
