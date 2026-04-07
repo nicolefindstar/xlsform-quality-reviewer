@@ -67,6 +67,8 @@ class XLSFormParser:
         self.choices_df: pd.DataFrame = None
         self.choices_dict: dict       = {}   # list_name → [choice_names]
         self.questions: list          = []
+        self.settings: dict           = {}   # settings sheet key→value
+        self.label_langs: list        = []   # detected language suffixes e.g. ["English","French"]
         self._parse(file_obj)
 
     def _parse(self, file_obj):
@@ -77,12 +79,27 @@ class XLSFormParser:
             df = xl.parse(sheet_map["survey"])
             df.columns = [c.strip().lower() for c in df.columns]
             self.survey_df = df
+            # Detect multilingual label columns
+            self.label_langs = [
+                col.split(":", 1)[1].strip()
+                for col in df.columns
+                if col.startswith("label:") and ":" in col
+            ]
 
         if "choices" in sheet_map:
             df = xl.parse(sheet_map["choices"])
             df.columns = [c.strip().lower() for c in df.columns]
             self.choices_df = df
             self._build_choices()
+
+        if "settings" in sheet_map:
+            df = xl.parse(sheet_map["settings"])
+            df.columns = [c.strip().lower() for c in df.columns]
+            for _, row in df.iterrows():
+                for col in df.columns:
+                    v = self._val(row, col)
+                    if v:
+                        self.settings[col] = v
 
         if self.survey_df is not None:
             self._build_questions()
@@ -123,9 +140,15 @@ class XLSFormParser:
                 "default":            self._val(row, "default"),
                 "appearance":         self._val(row, "appearance"),
                 "disabled":           self._val(row, "disabled"),
-                "read_only":          self._val(row, "read_only"),
+                "read_only":          self._val(row, "read_only") or self._val(row, "readonly"),
+                "parameters":         self._val(row, "parameters"),
                 "choices":            [],
                 "list_name":          None,
+                "_label_cols":        {
+                    col: self._val(row, col)
+                    for col in (self.survey_df.columns if self.survey_df is not None else [])
+                    if col == "label" or col.startswith("label:")
+                },
             }
 
             base = q_type.split()[0]
@@ -1432,17 +1455,41 @@ class DesignAdvisor:
     # ── public ────────────────────────────────────────────────────────────────
 
     def analyze_all(self) -> list:
+        # ── Integrity (broken references / data corruption) ───────────────────
+        self._check_broken_variable_references()
+        self._check_select_multiple_space_names()
+        # ── Choice logic ──────────────────────────────────────────────────────
         self._check_exclusive_choice_constraints()
         self._check_missing_dk_on_sensitive()
+        # ── Validation bounds ─────────────────────────────────────────────────
         self._check_numeric_bounds()
+        self._check_required_without_message()
+        # ── Skip logic ────────────────────────────────────────────────────────
         self._check_implicit_followups()
+        self._check_readonly_without_default()
+        # ── Calculate fields ──────────────────────────────────────────────────
+        self._check_calculate_once()
+        self._check_pulldata_type_conversion()
+        # ── Guidance & labels ─────────────────────────────────────────────────
         self._check_hint_coverage()
         self._check_label_quality()
+        self._check_text_multiline_appearance()
+        # ── Question design ───────────────────────────────────────────────────
         self._check_likert_balance()
+        self._check_likert_appearance()
+        # ── GPS / media ───────────────────────────────────────────────────────
+        self._check_geopoint_accuracy()
+        # ── Form metadata ─────────────────────────────────────────────────────
+        self._check_settings_completeness()
         self._check_audit_trail()
+        self._check_multilingual_completeness()
+        # ── Survey flow ───────────────────────────────────────────────────────
         self._check_section_notes()
+        # ── Performance & efficiency ──────────────────────────────────────────
         self._check_large_choice_lists()
+        self._check_very_large_choice_csv()
         self._check_repeat_candidates()
+        self._check_form_complexity()
         return sorted(self._sugg, key=lambda s: Suggestion.PRI_ORDER.get(s.priority, 1))
 
     # ── internal helpers ──────────────────────────────────────────────────────
@@ -1885,6 +1932,498 @@ class DesignAdvisor:
                     priority="Medium",
                 ))
 
+    # ── 12. Broken ${varname} references ─────────────────────────────────────
+
+    def _check_broken_variable_references(self):
+        """Detect ${varname} refs in relevance/constraint/calculation that don't exist."""
+        defined = {q["name"] for q in self.parser.questions if q.get("name")}
+        ref_re  = re.compile(r"\$\{([^}]+)\}")
+        expr_fields = ("relevant", "constraint", "calculation", "default")
+        broken_by_var: dict = {}   # undefined_name → [(field, col)]
+
+        for q in self.parser.questions:
+            for col in expr_fields:
+                expr = q.get(col, "")
+                if not expr:
+                    continue
+                for m in ref_re.finditer(expr):
+                    ref = m.group(1).strip()
+                    if ref not in defined:
+                        broken_by_var.setdefault(ref, []).append((q["name"], col))
+
+        for ref, usages in broken_by_var.items():
+            affected = list({u[0] for u in usages})
+            cols_used = list({u[1] for u in usages})
+            self._add(Suggestion(
+                category="Reference Integrity",
+                title=f"Undefined variable reference: ${{{ref}}}",
+                description=(
+                    f"The expression `${{{ref}}}` appears in the `{'`, `'.join(cols_used)}` "
+                    f"column(s) of {len(affected)} field(s) but `{ref}` is not defined anywhere "
+                    "in the survey sheet. This is almost certainly a typo and will cause the "
+                    "condition to silently fail — the question may always show or always hide."
+                ),
+                action=(
+                    f"Check whether `{ref}` is a misspelling of an existing field name. "
+                    "Correct the reference or add the missing field."
+                ),
+                vars=affected[:8],
+                priority="High",
+            ))
+
+    # ── 13. select_multiple choice names with spaces ──────────────────────────
+
+    def _check_select_multiple_space_names(self):
+        """Choice names containing spaces break select_multiple response parsing."""
+        seen_lists = set()
+        for q in self.questions:
+            if not q["type"].startswith("select_multiple"):
+                continue
+            ln = q.get("list_name")
+            if not ln or ln in seen_lists:
+                continue
+            seen_lists.add(ln)
+            bad = [c for c in self.choices.get(ln, []) if " " in c]
+            if bad:
+                self._add(Suggestion(
+                    category="Reference Integrity",
+                    title="Choice names with spaces in a select_multiple list",
+                    description=(
+                        f"Choice list **{ln}** (used by `select_multiple`) contains choice "
+                        f"name(s) with spaces: {', '.join(f'`{b}`' for b in bad[:5])}. "
+                        "XLSForm stores multi-select responses as space-separated values, so "
+                        "a choice name with a space will be split into two tokens during analysis, "
+                        "corrupting the data silently."
+                    ),
+                    action=(
+                        "Replace spaces in choice names with underscores "
+                        "(e.g. `crop type` → `crop_type`). Labels can still contain spaces."
+                    ),
+                    vars=[q2["name"] for q2 in self.questions if q2.get("list_name") == ln],
+                    priority="High",
+                ))
+
+    # ── 14. Required fields without required_message ──────────────────────────
+
+    def _check_required_without_message(self):
+        for q in self.questions:
+            if q.get("required", "").lower() not in ("yes", "true", "1"):
+                continue
+            if q.get("required_message"):
+                continue
+            # Only flag answerable non-structural types
+            base = q["type"].split()[0]
+            if base in XLSFormParser.STRUCTURAL or base in ("note", "calculate"):
+                continue
+            self._add(Suggestion(
+                category="Enumerator Guidance",
+                title="Required field without a required_message",
+                description=(
+                    f"**{q['name']}** is marked required but has no `required_message`. "
+                    "When the enumerator tries to advance without answering, SurveyCTO shows "
+                    "a generic 'This field is required' prompt that gives no context."
+                ),
+                action=(
+                    "Add a `required_message` that explains why the field is mandatory "
+                    "and what the enumerator should do (e.g. 'This question must be answered. "
+                    "If the respondent refuses, select Prefer not to answer.')."
+                ),
+                vars=[q["name"]],
+                priority="Low",
+            ))
+
+    # ── 15. Read-only fields without a default ────────────────────────────────
+
+    def _check_readonly_without_default(self):
+        for q in self.questions:
+            if q.get("read_only", "").lower() not in ("yes", "true", "1"):
+                continue
+            if q.get("default") or q.get("calculation"):
+                continue
+            self._add(Suggestion(
+                category="Skip Logic",
+                title="Read-only field with no default or calculation",
+                description=(
+                    f"**{q['name']}** is marked `read_only` but has neither a `default` "
+                    "value nor a `calculation`. The field will always be blank and "
+                    "uneditable — it will display nothing to the enumerator."
+                ),
+                action=(
+                    "Either add a `default` value or a `calculation` expression to populate "
+                    "the field, or remove the `read_only` flag if editing is intended."
+                ),
+                vars=[q["name"]],
+                priority="Medium",
+            ))
+
+    # ── 16. Calculate fields that should use once() ───────────────────────────
+
+    def _check_calculate_once(self):
+        """Static calculations (no variable references) should use once() to avoid
+        re-evaluation every time any field changes."""
+        ref_re = re.compile(r"\$\{[^}]+\}")
+        for q in self.questions:
+            if q["type"] != "calculate":
+                continue
+            calc = q.get("calculation", "")
+            if not calc:
+                continue
+            # Skip if already uses once() or today()/now()
+            if "once(" in calc or "today()" in calc or "now()" in calc or "random()" in calc:
+                continue
+            # If the expression contains no variable references, it's purely static
+            if not ref_re.search(calc) and len(calc) > 3:
+                self._add(Suggestion(
+                    category="Performance",
+                    title="Static calculate field not wrapped in once()",
+                    description=(
+                        f"**{q['name']}** is a `calculate` field whose expression "
+                        f"`{calc[:80]}{'…' if len(calc) > 80 else ''}` contains no variable "
+                        "references. SurveyCTO re-evaluates all calculations every time any "
+                        "field changes, so static calculations add unnecessary overhead. "
+                        "Wrapping in `once()` evaluates the expression only at first load."
+                    ),
+                    action="Wrap the expression with `once()` to prevent repeated evaluation:",
+                    example=f"once({calc[:60]}{'…)' if len(calc) > 60 else ')'}",
+                    vars=[q["name"]],
+                    priority="Low",
+                ))
+
+    # ── 17. pulldata() without type conversion ────────────────────────────────
+
+    def _check_pulldata_type_conversion(self):
+        """pulldata() returns text strings; arithmetic on them requires int()/number()."""
+        arith_re = re.compile(r"pulldata\s*\(", re.I)
+        math_ops  = re.compile(r"[\+\-\*\/]|div\b|mod\b|>=|<=|>|<", re.I)
+        for q in self.questions:
+            calc = q.get("calculation", "") or q.get("constraint", "")
+            if not calc:
+                continue
+            if not arith_re.search(calc):
+                continue
+            # Check if pulldata result is used in arithmetic without wrapping
+            if math_ops.search(calc) and "int(" not in calc and "number(" not in calc:
+                self._add(Suggestion(
+                    category="Reference Integrity",
+                    title="pulldata() result used in arithmetic without type conversion",
+                    description=(
+                        f"**{q['name']}** uses `pulldata()` alongside arithmetic operators "
+                        "but does not convert the result with `int()` or `number()`. "
+                        "`pulldata()` always returns a text string; using it directly in "
+                        "arithmetic will silently produce empty or NaN results in SurveyCTO."
+                    ),
+                    action=(
+                        "Wrap the `pulldata()` call with `int()` or `number()` before "
+                        "performing arithmetic:"
+                    ),
+                    example="int(pulldata('dataset', 'col', 'key_col', ${keyfield}))",
+                    vars=[q["name"]],
+                    priority="High",
+                ))
+
+    # ── 18. Likert questions without randomized appearance ────────────────────
+
+    def _check_likert_appearance(self):
+        """Opinion/attitude Likert questions should randomize choice order to
+        reduce primacy/recency and acquiescence bias."""
+        checked_lists = set()
+        for q in self.questions:
+            ln = q.get("list_name")
+            if not ln or ln in checked_lists:
+                continue
+            labels_text = " | ".join(self._choice_labels(ln))
+            if not self._LIKERT_LABELS.search(labels_text):
+                continue
+            checked_lists.add(ln)
+            appearance = q.get("appearance", "")
+            if "randomized" in appearance or "likert" in appearance:
+                continue
+            affected = [q2["name"] for q2 in self.questions if q2.get("list_name") == ln]
+            self._add(Suggestion(
+                category="Question Design",
+                title="Likert/attitude scale without randomized choice order",
+                description=(
+                    f"Questions using choice list **{ln}** appear to use a Likert or "
+                    "attitude scale but have no `randomized` appearance. Presenting response "
+                    "options in a fixed order introduces primacy bias (first option selected "
+                    "more often) and recency bias, affecting cross-respondent comparability."
+                ),
+                action=(
+                    "Add `randomized` to the `appearance` column for these questions. "
+                    "If 'Other' or 'Don't know' must stay at the bottom, use "
+                    "`randomized(0, 1)` to exclude the last choice from randomization:"
+                ),
+                example="randomized(0, 1)",
+                vars=affected[:6],
+                priority="Medium",
+            ))
+
+    # ── 19. GPS fields without accuracy parameters ────────────────────────────
+
+    def _check_geopoint_accuracy(self):
+        for q in self.questions:
+            if q["type"].split()[0] != "geopoint":
+                continue
+            params = q.get("parameters", "")
+            if "capture-accuracy" in params or "accuracy" in params:
+                continue
+            self._add(Suggestion(
+                category="Data Quality",
+                title="GPS field without accuracy threshold",
+                description=(
+                    f"**{q['name']}** collects GPS coordinates but does not set "
+                    "`capture-accuracy` or `warning-accuracy` parameters. Without these, "
+                    "the form will accept any GPS reading regardless of precision, "
+                    "potentially recording locations accurate only to hundreds of metres."
+                ),
+                action=(
+                    "Add accuracy parameters in the `parameters` column. "
+                    "`capture-accuracy` sets the required precision before the point is "
+                    "recorded; `warning-accuracy` shows a warning but allows submission:"
+                ),
+                example="capture-accuracy=10 warning-accuracy=25",
+                vars=[q["name"]],
+                priority="Medium",
+            ))
+
+    # ── 20. Settings sheet completeness ──────────────────────────────────────
+
+    def _check_settings_completeness(self):
+        settings = self.parser.settings
+        missing  = []
+        if not settings.get("form_id"):
+            missing.append(("form_id", "Unique form identifier — required for server upload and version management."))
+        if not settings.get("form_title"):
+            missing.append(("form_title", "Human-readable title shown on the device and server."))
+        if not settings.get("version"):
+            missing.append(("version", "Version string — recommended format `yyyymmddrr` (e.g. `2024060101`)."))
+
+        for field, desc in missing:
+            self._add(Suggestion(
+                category="Form Metadata",
+                title=f"Missing `{field}` in settings sheet",
+                description=(
+                    f"The settings sheet does not define `{field}`. {desc} "
+                    "Without a form_id, SurveyCTO may not correctly track or de-duplicate "
+                    "form versions on the server."
+                ),
+                action=(
+                    f"Add a `{field}` column to the settings sheet with an appropriate value. "
+                    + ("The version should follow `yyyymmddrr` format (year-month-day-revision)."
+                       if field == "version" else "")
+                ),
+                example={"form_id": "my_survey_v1", "form_title": "Household Baseline Survey",
+                         "version": "2024060101"}.get(field, ""),
+                vars=[],
+                priority="Medium" if field == "version" else "High",
+            ))
+
+        # Check version format if present
+        ver = settings.get("version", "")
+        if ver and not re.match(r"^\d{8,10}$", ver.replace("-", "").replace("_", "")):
+            self._add(Suggestion(
+                category="Form Metadata",
+                title="Form version not in recommended yyyymmddrr format",
+                description=(
+                    f"The form version is `{ver}`. SurveyCTO recommends the format "
+                    "`yyyymmddrr` (year + month + day + 2-digit revision number, e.g. "
+                    "`2024060101`). This format sorts correctly and makes the release date "
+                    "immediately visible on the server."
+                ),
+                action="Update the `version` field in the settings sheet to follow `yyyymmddrr`:",
+                example="2024060101",
+                vars=[],
+                priority="Low",
+            ))
+
+    # ── 21. Multilingual completeness ─────────────────────────────────────────
+
+    def _check_multilingual_completeness(self):
+        langs = self.parser.label_langs
+        if len(langs) < 2:
+            return
+        incomplete_by_lang: dict = {}
+        for q in self.questions:
+            base = q["type"].split()[0]
+            if base in XLSFormParser.STRUCTURAL or base == "calculate":
+                continue
+            label_cols = q.get("_label_cols", {})
+            for col, val in label_cols.items():
+                if col.startswith("label:"):
+                    lang = col.split(":", 1)[1].strip()
+                    if not val or val.lower() in ("nan", ""):
+                        incomplete_by_lang.setdefault(lang, []).append(q["name"])
+
+        for lang, missing_vars in incomplete_by_lang.items():
+            if len(missing_vars) == 0:
+                continue
+            self._add(Suggestion(
+                category="Multilingual",
+                title=f"Incomplete translation: {len(missing_vars)} fields missing `{lang}` label",
+                description=(
+                    f"The form has multilingual labels ({', '.join(langs)}) but "
+                    f"**{len(missing_vars)}** question(s) have no `{lang}` translation. "
+                    "When a respondent or enumerator selects that language, these questions "
+                    "will display blank labels, potentially halting the interview."
+                ),
+                action=(
+                    f"Fill in the `label:{lang}` column for all questions. "
+                    "Use the printable form feature in SurveyCTO to cross-check coverage."
+                ),
+                vars=missing_vars[:8],
+                priority="High" if len(missing_vars) > 5 else "Medium",
+            ))
+
+    # ── 22. Long-answer text without multiline appearance ─────────────────────
+
+    def _check_text_multiline_appearance(self):
+        open_ended = re.compile(
+            r"\b(describe|explain|comment|reason|feedback|opinion|suggest|detail|"
+            r"specify|elaborate|note|other|additional)\b", re.I
+        )
+        for q in self.questions:
+            if q["type"] != "text":
+                continue
+            if "multiline" in q.get("appearance", ""):
+                continue
+            label = q.get("label", "")
+            name  = q["name"]
+            if open_ended.search(label) or open_ended.search(name):
+                self._add(Suggestion(
+                    category="Enumerator Guidance",
+                    title="Open-ended text field without multiline appearance",
+                    description=(
+                        f"**{name}** appears to invite a long or free-text response "
+                        "(label/name suggests: describe, explain, specify, etc.) but uses "
+                        "a single-line text input by default. On mobile devices this is "
+                        "uncomfortable for long answers and may discourage complete responses."
+                    ),
+                    action=(
+                        "Set `appearance = multiline` in the survey sheet to expand the "
+                        "input box and allow comfortable multi-line entry."
+                    ),
+                    example="appearance: multiline",
+                    vars=[name],
+                    priority="Low",
+                ))
+
+    # ── 23. Very large choice lists → CSV ─────────────────────────────────────
+
+    def _check_very_large_choice_csv(self):
+        seen = set()
+        for q in self.questions:
+            ln = q.get("list_name")
+            if not ln or ln in seen:
+                continue
+            seen.add(ln)
+            count = len(self.choices.get(ln, []))
+            if count < 200:
+                continue
+            self._add(Suggestion(
+                category="Performance",
+                title=f"Choice list with {count} options should be a CSV dataset",
+                description=(
+                    f"Choice list **{ln}** has {count} options stored on the choices sheet. "
+                    "SurveyCTO loads all choices into device memory when the form opens. "
+                    "Lists of this size significantly slow form loading and navigation, "
+                    "and are a documented cause of app crashes on low-end Android devices."
+                ),
+                action=(
+                    "Move this choice list to a pre-loaded CSV dataset and use "
+                    "`select_one_from_file` or a `search()` expression with `pulldata()`. "
+                    "Also set `appearance = search` to enable filtering as the enumerator types."
+                ),
+                example=f"type: select_one_from_file {ln}.csv",
+                vars=[q2["name"] for q2 in self.questions if q2.get("list_name") == ln],
+                priority="High",
+            ))
+
+    # ── 24. Form complexity / performance warnings ────────────────────────────
+
+    def _check_form_complexity(self):
+        all_qs = self.parser.questions
+        answerable = self.questions
+
+        # Very long form
+        if len(answerable) > 300:
+            self._add(Suggestion(
+                category="Performance",
+                title=f"Very long form ({len(answerable)} questions) — consider splitting",
+                description=(
+                    f"The form has {len(answerable)} answerable questions. "
+                    "SurveyCTO holds all fields in memory simultaneously regardless of "
+                    "skip logic, and forms exceeding ~300–400 fields can load slowly and "
+                    "cause crashes on low-end devices, especially with nested repeats."
+                ),
+                action=(
+                    "Split the form into topical modules linked by a shared unique ID "
+                    "(barcode scan, household ID, or `caseid` field). Each module loads "
+                    "independently and can be merged server-side."
+                ),
+                vars=[],
+                priority="Medium",
+            ))
+
+        # Many calculate fields
+        calc_count = sum(1 for q in all_qs if q["type"] == "calculate")
+        if calc_count > 50:
+            self._add(Suggestion(
+                category="Performance",
+                title=f"High calculate field count ({calc_count} fields)",
+                description=(
+                    f"The form contains {calc_count} `calculate` fields. "
+                    "Every time any field is answered, SurveyCTO re-evaluates all "
+                    "calculation expressions that reference it. A large number of "
+                    "chained calculations can cause noticeable lag between questions."
+                ),
+                action=(
+                    "Wrap static calculations (no variable references) in `once()`. "
+                    "Consolidate related calculations into fewer fields using nested "
+                    "expressions. Avoid chains where calculation A feeds B feeds C feeds D."
+                ),
+                vars=[],
+                priority="Low",
+            ))
+
+        # Repeat groups with many fields
+        in_repeat    = False
+        repeat_stack = 0
+        repeat_field_count = 0
+        repeat_name  = None
+        for q in all_qs:
+            t = q["type"].split()[0]
+            if t in ("begin_repeat", "begin repeat"):
+                repeat_stack += 1
+                if repeat_stack == 1:
+                    in_repeat = True
+                    repeat_name = q["name"]
+                    repeat_field_count = 0
+            elif t in ("end_repeat", "end repeat"):
+                if repeat_stack == 1 and repeat_field_count > 30:
+                    self._add(Suggestion(
+                        category="Performance",
+                        title=f"Large repeat group '{repeat_name}' ({repeat_field_count} fields)",
+                        description=(
+                            f"Repeat group **{repeat_name}** contains {repeat_field_count} fields. "
+                            "In SurveyCTO, each repeat instance multiplies the in-memory field "
+                            "count (e.g. 40 fields × 20 repeats = 800 virtual fields). "
+                            "High repeat counts with many fields are the most common cause "
+                            "of form slowness and crashes."
+                        ),
+                        action=(
+                            "Reduce fields inside the repeat to the minimum required. "
+                            "Move fields that only need to be asked once (e.g. household-level "
+                            "information) outside the repeat group."
+                        ),
+                        vars=[repeat_name],
+                        priority="Medium",
+                    ))
+                repeat_stack = max(0, repeat_stack - 1)
+                if repeat_stack == 0:
+                    in_repeat = False
+            elif in_repeat and repeat_stack == 1:
+                repeat_field_count += 1
+
     # ── choice-label lookup ───────────────────────────────────────────────────
 
     def _choice_labels(self, list_name: str) -> list:
@@ -1909,6 +2448,7 @@ _PRI_COLOR = {
 }
 
 _CAT_ICON = {
+    "Reference Integrity":  "🔗",
     "Choice Logic":         "🔘",
     "Respondent Experience":"🤝",
     "Validation":           "🔢",
@@ -1918,6 +2458,9 @@ _CAT_ICON = {
     "Data Quality":         "📊",
     "Survey Flow":          "📋",
     "Efficiency":           "⚡",
+    "Performance":          "🐢",
+    "Form Metadata":        "🏷️",
+    "Multilingual":         "🌐",
 }
 
 
