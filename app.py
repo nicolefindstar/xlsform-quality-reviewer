@@ -1906,65 +1906,87 @@ class DesignAdvisor:
     # ── 10. Oversized choice lists ────────────────────────────────────────────
 
     def _check_large_choice_lists(self):
+        affected = []   # (field_name, list_name, option_count)
+        seen_lists = set()
         for q in self.questions:
             ln = q.get("list_name")
             if not ln:
                 continue
-            choices = self.choices.get(ln, [])
-            if len(choices) < 20:
+            count = len(self.choices.get(ln, []))
+            if count < 20:
                 continue
-            appearance = q.get("appearance", "")
-            if "search" in appearance or "autocomplete" in appearance:
+            if "search" in q.get("appearance", "") or "autocomplete" in q.get("appearance", ""):
                 continue
-            self._add(Suggestion(
-                category="Efficiency",
-                title="Large choice list without autocomplete appearance",
-                description=(
-                    f"**{q['name']}** uses choice list `{ln}` with {len(choices)} options. "
-                    "Scrolling through a long list is slow and error-prone on tablets. "
-                    "SurveyCTO supports a searchable dropdown that narrows options as "
-                    "the enumerator types."
-                ),
-                action=(
-                    "Set `appearance = search` (SurveyCTO) or `autocomplete` (ODK) in the "
-                    "survey sheet for this question to enable a filtered dropdown."
-                ),
-                example=f"appearance: search",
-                vars=[q["name"]],
-                priority="Medium",
-            ))
+            affected.append((q["name"], ln, count))
+
+        if not affected:
+            return
+
+        # Build a compact summary: sort by descending option count
+        affected.sort(key=lambda x: -x[2])
+        detail = "; ".join(
+            f"`{name}` ({count} options)"
+            for name, _, count in affected[:8]
+        ) + ("…" if len(affected) > 8 else "")
+
+        self._add(Suggestion(
+            category="Efficiency",
+            title=f"Large choice lists without autocomplete appearance ({len(affected)} fields)",
+            description=(
+                f"**{len(affected)} field(s)** use choice lists with 20 or more options but "
+                "have no `search` or `autocomplete` appearance. Scrolling through long lists "
+                f"is slow and error-prone on tablets: {detail}."
+            ),
+            action=(
+                "Set `appearance = search` (SurveyCTO) or `autocomplete` (ODK) in the "
+                "survey sheet for each field to enable a filtered dropdown as the enumerator types."
+            ),
+            example="appearance: search",
+            vars=[name for name, _, _ in affected],
+            priority="Medium",
+        ))
 
     # ── 11. Repeat-group candidates ───────────────────────────────────────────
 
     def _check_repeat_candidates(self):
         """Flag groups of similarly-named questions that suggest a roster pattern."""
         from collections import defaultdict
-        stem_map = defaultdict(list)
+        stem_map  = defaultdict(list)
         suffix_re = re.compile(r"_(\d+)$")
         for q in self.questions:
             m = suffix_re.search(q["name"])
             if m:
-                stem = q["name"][:m.start()]
-                stem_map[stem].append(q["name"])
-        for stem, members in stem_map.items():
-            if len(members) >= 4:
-                self._add(Suggestion(
-                    category="Efficiency",
-                    title="Repeated numbered questions — consider a repeat group",
-                    description=(
-                        f"Found {len(members)} questions with the pattern `{stem}_N` "
-                        f"({', '.join(members[:4])}{'…' if len(members) > 4 else ''}). "
-                        "This pattern often indicates a roster that is hard-coded as individual "
-                        "questions, which makes the form inflexible and hard to maintain."
-                    ),
-                    action=(
-                        f"Replace `{stem}_1` … `{stem}_{len(members)}` with a single question "
-                        f"inside a `begin repeat` / `end repeat` block. Set the repeat count "
-                        "using a prior count question (e.g. household size)."
-                    ),
-                    vars=members[:6],
-                    priority="Medium",
-                ))
+                stem_map[q["name"][:m.start()]].append(q["name"])
+
+        patterns = [(stem, members) for stem, members in stem_map.items() if len(members) >= 4]
+        if not patterns:
+            return
+
+        patterns.sort(key=lambda x: -len(x[1]))   # largest first
+        total_fields = sum(len(m) for _, m in patterns)
+        pattern_summary = "; ".join(
+            f"`{stem}_N` ({len(members)} fields)"
+            for stem, members in patterns[:6]
+        ) + ("…" if len(patterns) > 6 else "")
+        all_vars = [v for _, members in patterns for v in members[:4]]  # sample from each
+
+        self._add(Suggestion(
+            category="Efficiency",
+            title=f"Repeated numbered questions — consider repeat groups ({len(patterns)} patterns, {total_fields} fields)",
+            description=(
+                f"**{len(patterns)} naming pattern(s)** suggest hard-coded rosters: {pattern_summary}. "
+                "Hard-coding roster items as individual numbered questions makes forms inflexible, "
+                "difficult to maintain, and prevents dynamic roster lengths."
+            ),
+            action=(
+                "Replace each `stem_1` … `stem_N` series with a single question inside a "
+                "`begin repeat` / `end repeat` block. Set `repeat_count` using a prior "
+                "count field (e.g. number of household members or crops)."
+            ),
+            example="begin repeat  crop_loop\n  [questions]\nend repeat  crop_loop",
+            vars=all_vars[:10],
+            priority="Medium",
+        ))
 
     # ── 12. Broken ${varname} references ─────────────────────────────────────
 
