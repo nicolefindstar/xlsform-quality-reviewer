@@ -2622,22 +2622,25 @@ class ReportGenerator:
     }
 
     def generate(self, parser: XLSFormParser, results: list,
-                 static_issues: list, sim_issues: list, num_sims: int) -> str:
-        ts          = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        all_issues  = static_issues + sim_issues
-        sev_counts  = Counter(i.severity for i in all_issues)
-        path_lens   = [len(r.path_taken) for r in results] if results else []
+                 static_issues: list, sim_issues: list, num_sims: int,
+                 suggestions: list = None) -> str:
+        ts           = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        all_issues   = static_issues + sim_issues
+        sev_counts   = Counter(i.severity for i in all_issues)
+        path_lens    = [len(r.path_taken) for r in results] if results else []
         unique_paths = len(set(r.path_signature for r in results)) if results else 0
-        stats       = parser.form_stats()
+        stats        = parser.form_stats()
+        suggestions  = suggestions or []
 
         return (
             self._open(ts)
             + self._header(ts)
-            + self._kpi(num_sims, unique_paths, len(all_issues), sev_counts, stats)
+            + self._kpi(num_sims, unique_paths, len(all_issues), sev_counts, stats, suggestions)
             + self._source_breakdown(static_issues, sim_issues)
             + self._severity_chart(sev_counts)
             + (self._path_chart(path_lens, num_sims, unique_paths) if path_lens else "")
             + self._issues_table(all_issues)
+            + self._suggestions_section(suggestions)
             + self._footer(ts)
             + "</div></body></html>"
         )
@@ -2656,17 +2659,23 @@ class ReportGenerator:
                 f'Standards: World Bank DIME ietestform &amp; IPA ipacheckscto</p>'
                 f'</div></div>\n')
 
-    def _kpi(self, num_sims, unique_paths, total, sev_counts, stats):
-        ic = "#cc8080" if total else "#6aab90"
+    def _kpi(self, num_sims, unique_paths, total, sev_counts, stats, suggestions):
+        ic  = "#cc8080" if total else "#6aab90"
+        sc  = "#cc9470" if suggestions else "#6aab90"
+        pri = Counter(s.priority for s in suggestions)
         kpis = [
-            (num_sims,                   "Simulations",    "#6a9cc8"),
-            (unique_paths,               "Unique Paths",   "#6ab0c8"),
-            (stats["answerable"],        "Questions",      "#9888c8"),
-            (total,                      "Total Issues",   ic),
-            (sev_counts.get("Critical",0),"Critical",      "#cc8080"),
-            (sev_counts.get("High",0),   "High",           "#cc9470"),
-            (sev_counts.get("Medium",0), "Medium",         "#ccb460"),
-            (sev_counts.get("Low",0),    "Low",            "#6aab90"),
+            (num_sims,                    "Simulations",       "#6a9cc8"),
+            (unique_paths,                "Unique Paths",      "#6ab0c8"),
+            (stats["answerable"],         "Questions",         "#9888c8"),
+            (total,                       "Total Issues",      ic),
+            (sev_counts.get("Critical",0),"Critical",          "#cc8080"),
+            (sev_counts.get("High",0),    "High",              "#cc9470"),
+            (sev_counts.get("Medium",0),  "Medium",            "#ccb460"),
+            (sev_counts.get("Low",0),     "Low",               "#6aab90"),
+            (len(suggestions),            "Design Suggestions",sc),
+            (pri.get("High",0),           "High Priority",     "#cc9470"),
+            (pri.get("Medium",0),         "Med Priority",      "#ccb460"),
+            (pri.get("Low",0),            "Low Priority",      "#6aab90"),
         ]
         cards = "".join(
             f'<div class="kpi"><div class="kv" style="color:{c}">{v}</div>'
@@ -2790,6 +2799,83 @@ class ReportGenerator:
             f'<tbody>{rows}</tbody></table></div></div>\n'
         )
 
+    def _suggestions_section(self, suggestions: list) -> str:
+        _PRI = {
+            "High":   ("#cc9470", "#fdf5ee"),
+            "Medium": ("#ccb460", "#fdf8e8"),
+            "Low":    ("#6aab90", "#e8f6f0"),
+        }
+        _ICON = {
+            "Reference Integrity":  "🔗", "Choice Logic":        "🔘",
+            "Respondent Experience":"🤝", "Validation":          "🔢",
+            "Skip Logic":           "↪",  "Enumerator Guidance": "💬",
+            "Question Design":      "✏",  "Data Quality":        "📊",
+            "Survey Flow":          "📋", "Efficiency":          "⚡",
+            "Performance":          "🐢", "Form Metadata":       "🏷",
+            "Multilingual":         "🌐",
+        }
+
+        if not suggestions:
+            return ('<div class="card"><h2>💡 Design Improvement Suggestions</h2>'
+                    '<div class="ok"><div class="ok-icon">✓</div>'
+                    '<strong>No design suggestions.</strong>'
+                    '<p>The form follows best practices in all checked areas.</p>'
+                    '</div></div>\n')
+
+        by_cat: dict = {}
+        for s in suggestions:
+            by_cat.setdefault(s.category, []).append(s)
+
+        pri_counts = Counter(s.priority for s in suggestions)
+        summary = (f'{len(suggestions)} suggestion(s) &nbsp;·&nbsp; '
+                   f'<span style="color:#cc9470">{pri_counts.get("High",0)} High</span> &nbsp;·&nbsp; '
+                   f'<span style="color:#ccb460">{pri_counts.get("Medium",0)} Medium</span> &nbsp;·&nbsp; '
+                   f'<span style="color:#6aab90">{pri_counts.get("Low",0)} Low</span>')
+
+        html = (f'<div class="card"><h2>💡 Design Improvement Suggestions</h2>'
+                f'<p class="sub">{summary}</p>'
+                f'<p class="sub" style="margin-top:-.4rem">These are not errors — the form will work as written. '
+                f'Addressing them can improve data quality, reduce non-response, and simplify cleaning.</p>')
+
+        for cat, items in sorted(by_cat.items()):
+            icon = _ICON.get(cat, "📌")
+            html += (f'<div class="sug-cat">'
+                     f'<div class="sug-cat-hdr">{icon} {html_module.escape(cat)}'
+                     f'<span class="sug-cat-count">{len(items)}</span></div>')
+            for s in items:
+                fg, bg = _PRI.get(s.priority, ("#64748b", "#f8fafc"))
+                # Vars chips
+                vars_html = ""
+                if s.vars:
+                    chips = "".join(
+                        f'<code class="qn">{html_module.escape(v)}</code>'
+                        for v in s.vars[:8]
+                    )
+                    more = (f'<span style="color:#94a3b8;font-style:italic;font-size:.78rem">'
+                            f' +{len(s.vars)-8} more</span>') if len(s.vars) > 8 else ""
+                    vars_html = f'<div class="sug-vars">{chips}{more}</div>'
+                # Example block
+                ex_html = ""
+                if s.example:
+                    ex_html = (f'<div class="sug-ex">'
+                               f'{html_module.escape(s.example)}</div>')
+                html += (
+                    f'<div class="sug-card" style="border-left-color:{fg};background:{bg}">'
+                    f'<div class="sug-head">'
+                    f'<span class="sug-title">{html_module.escape(s.title)}</span>'
+                    f'<span class="sug-pri" style="background:{fg};color:#fff">'
+                    f'{html_module.escape(s.priority)}</span></div>'
+                    f'<div class="sug-desc">{html_module.escape(s.description)}</div>'
+                    f'<div class="sug-action"><b>Suggested action:</b> '
+                    f'{html_module.escape(s.action)}</div>'
+                    f'{ex_html}{vars_html}'
+                    f'</div>'
+                )
+            html += '</div>'  # close sug-cat
+
+        html += '</div>\n'
+        return html
+
     def _footer(self, ts):
         return (f'<div class="foot">XLSForm Quality Reviewer &nbsp;·&nbsp; Quality Assurance Report &nbsp;·&nbsp; {ts}'
                 f'<br>Standards: World Bank DIME ietestform &amp; IPA ipacheckscto</div>\n')
@@ -2849,6 +2935,25 @@ code.qn{font-family:"SF Mono","Fira Code",monospace;background:#f1f5f9;
 .ok strong{color:#6aab90;font-size:1.1rem;display:block;margin:.5rem 0}
 .foot{text-align:center;color:var(--mu);font-size:.76rem;
   margin-top:2rem;padding-top:1rem;border-top:1px solid var(--bdr)}
+/* ── Design suggestions ── */
+.sug-cat{margin-bottom:1.2rem}
+.sug-cat-hdr{font-weight:700;font-size:.88rem;color:var(--primary);
+  padding:.4rem 0 .4rem 0;margin-bottom:.5rem;
+  border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:.5rem}
+.sug-cat-count{margin-left:auto;background:var(--pl);color:var(--primary);
+  font-size:.7rem;font-weight:700;padding:.1rem .45rem;border-radius:10px}
+.sug-card{border:1px solid #e2e8f0;border-left:4px solid #ccc;
+  border-radius:6px;padding:.75rem 1rem;margin-bottom:.6rem}
+.sug-head{display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem}
+.sug-title{font-weight:700;font-size:.87rem;line-height:1.4}
+.sug-pri{font-size:.67rem;font-weight:700;padding:.2rem .5rem;border-radius:10px;
+  white-space:nowrap;flex-shrink:0}
+.sug-desc{font-size:.84rem;color:#334155;margin-top:.35rem;line-height:1.55}
+.sug-action{font-size:.82rem;color:var(--mu);margin-top:.4rem}
+.sug-ex{margin-top:.45rem;background:#f1f5f9;padding:.35rem .65rem;
+  border-radius:5px;font-family:"SF Mono","Fira Code",monospace;
+  font-size:.8rem;color:#1e293b;white-space:pre-wrap;word-break:break-all}
+.sug-vars{margin-top:.4rem}
 </style>"""
 
 
@@ -3217,6 +3322,7 @@ def main():
         html_report = ReportGenerator().generate(
             parser, results, static_issues, sim_issues,
             num_sims if results else 0,
+            suggestions=suggestions,
         )
 
     ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
