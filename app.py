@@ -958,6 +958,9 @@ class StaticAnalyzer:
                         ))
 
     # ── WB §12-14 / IPA §8 — Group structure ─────────────────────────────────
+    # Note: end_group / end_repeat NAME is optional per the XLSForm spec and all
+    # major platforms (KoboToolbox, ODK, SurveyCTO). Only the begin row requires
+    # a name. Unnamed end rows are valid and must still close the matching begin.
 
     def _check_group_structure(self):
         def norm(t):
@@ -969,41 +972,40 @@ class StaticAnalyzer:
             if nt in ("begin_group", "begin_repeat"):
                 stack.append((nt, q["name"]))
             elif nt in ("end_group", "end_repeat"):
-                if not q["name"]:
-                    self._add(Issue(
-                        "(unnamed)", "Missing End-Group Name", "High",
-                        f'An {q["type"]} row has no name.',
-                        "Add a name that matches the corresponding begin statement.",
-                    ))
-                    continue
                 if stack:
                     begin_nt, begin_name = stack.pop()
                     begin_base = begin_nt.replace("begin_", "")
                     end_base   = nt.replace("end_", "")
                     if begin_base != end_base:
+                        # e.g. begin_group closed by end_repeat
+                        display = q["name"] or begin_name or f"({nt})"
                         self._add(Issue(
-                            q["name"], "Group Type Mismatch", "Critical",
+                            display, "Group Type Mismatch", "Critical",
                             f'"{begin_name}" opens as {begin_nt} but is closed by {nt}.',
                             f'Change to end_{begin_base} to match.',
                         ))
                     elif begin_name and q["name"] and begin_name != q["name"]:
+                        # Both have names and they disagree — likely a copy-paste error
                         self._add(Issue(
                             q["name"], "Group Name Mismatch", "Critical",
                             f'Group begins as "{begin_name}" but closes as "{q["name"]}".',
-                            'Ensure begin/end names match exactly.',
+                            'Ensure begin/end names match exactly (or leave the end row name blank).',
                         ))
+                    # If end row has no name, that is valid XLSForm — no issue raised.
                 else:
+                    # end_group/end_repeat with nothing open — structural error
+                    ref = q["name"] or f"({q['type']})"
                     self._add(Issue(
-                        q["name"], "Unmatched End Statement", "Critical",
-                        f'"{q["name"]}" ({q["type"]}) has no matching begin statement.',
-                        "Add a matching begin_group or begin_repeat before this row.",
+                        ref, "Unmatched End Statement", "Critical",
+                        f'An {q["type"]} row (name: "{q["name"] or "blank"}") has no matching begin statement.',
+                        "Add a matching begin_group or begin_repeat before this row, or remove the extra end row.",
                     ))
 
         for nt, name in stack:
             self._add(Issue(
                 name, "Unclosed Group/Repeat", "Critical",
-                f'"{name}" ({nt}) is never closed with a matching end statement.',
-                "Add a matching end_group or end_repeat.",
+                f'"{name}" ({nt}) is never closed with a matching end_group or end_repeat.',
+                "Add a matching end_group or end_repeat row after the last question in this group.",
             ))
 
     # ── WB §15-17 / IPA §2 — Field name length ───────────────────────────────
