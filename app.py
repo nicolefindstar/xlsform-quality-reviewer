@@ -21,193 +21,31 @@ st.set_page_config(
 )
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-
-/* ── Design tokens ─────────────────────────────────────────────── */
-:root {
-  --canvas:    #fbfaf9;
-  --stone:     #f2f0ed;
-  --parchment: #f8f7f4;
-  --graphite:  #474645;
-  --charcoal:  #343433;
-  --midnight:  #121212;
-  --ash:       #848281;
-  --fog:       #c6c6c6;
-  --ember:     #ff3e00;
-  --meadow:    #00ca48;
-  --sky:       #0090ff;
-  --sunburst:  #ffbb26;
-  --deep-amber:#d48f00;
-  --coral:     #ff2b3a;
-  --spearmint: #00c978;
-}
-
-/* ── Base page ─────────────────────────────────────────────────── */
-html, .stApp, [data-testid="stAppViewContainer"],
-[data-testid="stMain"], [data-testid="block-container"] {
-  background: var(--canvas) !important;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
-}
-
-/* ── Sidebar ───────────────────────────────────────────────────── */
-[data-testid="stSidebar"] {
-  background: var(--canvas) !important;
-  border-right: 1px solid var(--stone) !important;
-  box-shadow: none !important;
-}
-[data-testid="stSidebar"] section { background: var(--canvas) !important; }
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] li,
-[data-testid="stSidebar"] span { color: var(--graphite) !important; font-size: .875rem !important; }
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3,
-[data-testid="stSidebar"] strong { color: var(--charcoal) !important; }
-[data-testid="stSidebar"] hr { border-color: var(--stone) !important; margin: .75rem 0 !important; }
-[data-testid="stSidebar"] a { color: var(--ember) !important; }
-
-/* ── Typography ────────────────────────────────────────────────── */
-h1, h2, h3, h4,
-.stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-  font-family: 'Inter', sans-serif !important;
-  color: var(--charcoal) !important;
-}
-h1, .stMarkdown h1 { font-size: 1.65rem !important; font-weight: 700 !important; letter-spacing: -.4px; }
-h2, .stMarkdown h2 { font-size: 1.15rem !important; font-weight: 600 !important; letter-spacing: -.25px; }
-h3, .stMarkdown h3 { font-size: 1rem !important; font-weight: 600 !important; }
-p, .stMarkdown p, .stMarkdown li { color: var(--graphite) !important; font-size: .9rem; line-height: 1.55; }
-
-/* ── Metric cards ──────────────────────────────────────────────── */
-[data-testid="stMetric"] {
-  background: #fff !important;
-  box-shadow: var(--stone) 0px 0px 0px 1px inset !important;
-  border-radius: 10px !important;
-  padding: 1rem 1.1rem !important;
-}
-[data-testid="stMetricValue"] {
-  font-size: 1.8rem !important; font-weight: 700 !important;
-  color: var(--charcoal) !important; letter-spacing: -.5px;
-}
-[data-testid="stMetricLabel"] {
-  font-size: .72rem !important; text-transform: uppercase !important;
-  letter-spacing: .06em !important; color: var(--ash) !important; font-weight: 500 !important;
-}
-
-/* ── All buttons (pill light) ──────────────────────────────────── */
-.stButton > button {
-  font-family: 'Inter', sans-serif !important;
-  font-size: .875rem !important; font-weight: 500 !important;
-  border-radius: 32px !important;
-  padding: .45rem 1.25rem !important;
-  background: var(--parchment) !important;
-  color: var(--charcoal) !important;
-  border: 1px solid var(--stone) !important;
-  transition: background .2s ease, border-color .2s ease !important;
-}
-.stButton > button:hover {
-  background: var(--stone) !important; border-color: var(--ash) !important;
-}
-
-/* ── Download button (pill light) ───────────────────────────────── */
-[data-testid="stDownloadButton"] button {
-  background: var(--parchment) !important; color: var(--charcoal) !important;
-  border: 1px solid var(--stone) !important; border-radius: 32px !important;
-  font-family: 'Inter', sans-serif !important;
-  font-weight: 500 !important; font-size: .875rem !important;
-  padding: .5rem 1.5rem !important; width: 100% !important;
-  transition: background .2s ease, border-color .2s ease !important;
-}
-[data-testid="stDownloadButton"] button:hover {
-  background: var(--stone) !important; border-color: var(--ash) !important;
-}
-
-/* ── File uploader ─────────────────────────────────────────────── */
-[data-testid="stFileUploaderDropzone"] {
-  background: #fff !important;
-  border: 1.5px dashed var(--stone) !important;
-  border-radius: 10px !important;
-  transition: border-color .2s ease !important;
-}
-[data-testid="stFileUploaderDropzone"]:hover { border-color: var(--ember) !important; }
-
-/* ── Number input ──────────────────────────────────────────────── */
-[data-testid="stNumberInput"] input {
-  background: #fff !important;
-  border: 1px solid var(--stone) !important;
-  border-radius: 8px !important;
-  color: var(--charcoal) !important;
-  font-family: 'Inter', sans-serif !important;
-}
-
-/* ── Expander ──────────────────────────────────────────────────── */
-[data-testid="stExpander"] {
-  border: 1px solid var(--stone) !important;
-  border-radius: 10px !important;
-  background: #fff !important;
-}
-[data-testid="stExpander"] summary {
-  font-weight: 500 !important; color: var(--charcoal) !important; font-size: .9rem !important;
-}
-
-/* ── Alerts ────────────────────────────────────────────────────── */
-[data-testid="stAlert"] {
-  border-radius: 8px !important; border: none !important;
-  font-family: 'Inter', sans-serif !important;
-}
-
-/* ── Divider ───────────────────────────────────────────────────── */
-hr, [data-testid="stDivider"] > * { border-color: var(--stone) !important; }
-
-/* ── Caption text ──────────────────────────────────────────────── */
-.stCaption, [data-testid="stCaptionContainer"] p { color: var(--ash) !important; font-size: .8rem !important; }
-
-/* ── Dataframe ─────────────────────────────────────────────────── */
-[data-testid="stDataFrame"] { border-radius: 10px !important; overflow: hidden; }
-
-/* ── Progress bar ──────────────────────────────────────────────── */
-[data-testid="stProgressBar"] > div { background: var(--ember) !important; }
-
-/* ── Issue table ───────────────────────────────────────────────── */
-.xit-table { width:100%; border-collapse:collapse; font-size:.84rem; margin-top:.5rem;
-  font-family:'Inter',sans-serif; }
-.xit-table th { background:var(--parchment); text-align:left; padding:.5rem .75rem; font-weight:600;
-  color:var(--ash); text-transform:uppercase; letter-spacing:.05em; font-size:.68rem;
-  border-bottom:1px solid var(--stone); }
-.xit-table td { padding:.65rem .75rem; border-bottom:1px solid var(--stone); vertical-align:top; }
-.xit-table tr:last-child td { border-bottom:none; }
-.xit-table tr:hover td { background:var(--parchment); }
-.xit-badge { display:inline-block; padding:.2rem .6rem; border-radius:20px;
-  font-size:.68rem; font-weight:700; white-space:nowrap; }
-.xit-src { display:inline-block; font-size:.63rem; font-weight:600;
-  padding:.1rem .4rem; border-radius:4px; margin-top:.3rem; }
-.xit-src-s { background:#fff0ec; color:var(--ember); }
-.xit-src-m { background:#eef4ff; color:var(--sky); }
-.xit-count { text-align:center; font-weight:700; font-size:1rem; }
-.xit-vars code { font-family:"SF Mono","Fira Code",monospace; background:var(--parchment);
-  color:var(--charcoal); padding:.1rem .35rem; border-radius:4px; font-size:.76rem;
-  margin:1px 2px; display:inline-block; }
-.xit-fix { color:var(--ash); font-size:.8rem; margin-top:.4rem; line-height:1.5; }
-.xit-more { color:var(--fog); font-style:italic; font-size:.77rem; }
-
-/* ── Design suggestion cards ───────────────────────────────────── */
-.sug-cat-hdr { font-weight:600; font-size:.85rem; color:var(--charcoal);
-  padding:.35rem 0; margin-bottom:.5rem; border-bottom:1px solid var(--stone);
-  display:flex; align-items:center; gap:.5rem; }
-.sug-cat-count { margin-left:auto; background:var(--parchment); color:var(--ash);
-  font-size:.68rem; font-weight:700; padding:.1rem .45rem; border-radius:10px; }
-.sug-card { border:1px solid var(--stone); border-left:4px solid #ccc;
-  border-radius:10px; padding:.85rem 1rem; margin-bottom:.6rem; background:#fff; }
-.sug-head { display:flex; justify-content:space-between; align-items:flex-start; gap:.5rem; }
-.sug-title { font-weight:600; font-size:.87rem; line-height:1.4; color:var(--charcoal); }
-.sug-pri { font-size:.65rem; font-weight:700; padding:.2rem .5rem; border-radius:20px;
-  white-space:nowrap; flex-shrink:0; }
-.sug-desc { font-size:.84rem; color:var(--graphite); margin-top:.35rem; line-height:1.55; }
-.sug-action { font-size:.81rem; color:var(--ash); margin-top:.4rem; }
-.sug-ex { margin-top:.45rem; background:var(--parchment); padding:.45rem .75rem;
-  border-radius:6px; font-family:"SF Mono","Fira Code",monospace; font-size:.79rem;
-  color:var(--charcoal); white-space:pre-wrap; word-break:break-all;
-  border-left:2px solid var(--stone); }
-.sug-vars { margin-top:.4rem; }
+  [data-testid="stDownloadButton"] button {
+    background:#6a9cc8;color:white;border:none;width:100%;
+    font-weight:600;padding:.65rem 1rem;border-radius:8px;
+  }
+  [data-testid="stDownloadButton"] button:hover{background:#5a8cb8}
+  /* ── Grouped issue table ─────────────────────────────────────── */
+  .xit-table{width:100%;border-collapse:collapse;font-size:.84rem;margin-top:.5rem}
+  .xit-table th{background:#f1f5f9;text-align:left;padding:.5rem .75rem;font-weight:600;
+    color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-size:.7rem;
+    border-bottom:2px solid #e2e8f0}
+  .xit-table td{padding:.65rem .75rem;border-bottom:1px solid #e2e8f0;vertical-align:top}
+  .xit-table tr:last-child td{border-bottom:none}
+  .xit-table tr:hover td{background:#f8fafc}
+  .xit-badge{display:inline-block;padding:.2rem .6rem;border-radius:20px;
+    font-size:.7rem;font-weight:700;white-space:nowrap}
+  .xit-src{display:inline-block;font-size:.65rem;font-weight:600;
+    padding:.1rem .4rem;border-radius:4px;margin-top:.3rem}
+  .xit-src-s{background:#e8f2fc;color:#6a9cc8}
+  .xit-src-m{background:#f2eefc;color:#9888c8}
+  .xit-count{text-align:center;font-weight:800;font-size:1.05rem}
+  .xit-vars code{font-family:"SF Mono","Fira Code",monospace;background:#f1f5f9;
+    padding:.1rem .35rem;border-radius:3px;font-size:.78rem;margin:1px 2px;
+    display:inline-block}
+  .xit-fix{color:#64748b;font-size:.81rem;margin-top:.4rem;line-height:1.5}
+  .xit-more{color:#94a3b8;font-style:italic;font-size:.78rem}
 </style>
 """, unsafe_allow_html=True)
 
@@ -2779,10 +2617,10 @@ def _show_suggestions(suggestions: list):
 class ReportGenerator:
 
     _SEV_COLOR = {
-        "Critical": ("#ff2b3a", "#fff0f1"),
-        "High":     ("#d48f00", "#fff8e6"),
-        "Medium":   ("#0086fc", "#eef4ff"),
-        "Low":      ("#00995a", "#e8faf3"),
+        "Critical": ("#cc8080","#fdf0f0"),
+        "High":     ("#cc9470","#fdf5ee"),
+        "Medium":   ("#ccb460","#fdf8e8"),
+        "Low":      ("#6aab90","#e8f6f0"),
     }
 
     def generate(self, parser: XLSFormParser, results: list,
@@ -2817,31 +2655,29 @@ class ReportGenerator:
                 f'{self._css()}</head><body><div class="container">\n')
 
     def _header(self, ts):
-        return (f'<div class="header"><div class="hicon">📋</div>'
-                f'<div class="header-text">'
-                f'<div class="header-eyebrow">XLSForm Quality Reviewer</div>'
-                f'<h1>Quality Assurance Report</h1>'
-                f'<p>Generated {ts} &nbsp;·&nbsp; '
+        return (f'<div class="header"><div class="hicon">📋</div><div>'
+                f'<h1>XLSForm Quality Assurance Report</h1>'
+                f'<p>Generated {ts} &nbsp;·&nbsp; XLSForm Quality Reviewer &nbsp;·&nbsp; '
                 f'Standards: World Bank DIME ietestform &amp; IPA ipacheckscto</p>'
                 f'</div></div>\n')
 
     def _kpi(self, num_sims, unique_paths, total, sev_counts, stats, suggestions):
-        has_issues = total > 0
-        has_sug    = len(suggestions) > 0
+        ic  = "#cc8080" if total else "#6aab90"
+        sc  = "#cc9470" if suggestions else "#6aab90"
         pri = Counter(s.priority for s in suggestions)
         kpis = [
-            (num_sims,                    "Simulations",       "#343433"),
-            (unique_paths,                "Unique Paths",      "#343433"),
-            (stats["answerable"],         "Questions",         "#343433"),
-            (total,                       "Total Issues",      "#ff2b3a" if has_issues else "#00995a"),
-            (sev_counts.get("Critical",0),"Critical",          "#ff2b3a"),
-            (sev_counts.get("High",0),    "High",              "#d48f00"),
-            (sev_counts.get("Medium",0),  "Medium",            "#0086fc"),
-            (sev_counts.get("Low",0),     "Low",               "#00995a"),
-            (len(suggestions),            "Suggestions",       "#ff3e00" if has_sug else "#00995a"),
-            (pri.get("High",0),           "↑ High Priority",   "#d48f00"),
-            (pri.get("Medium",0),         "— Med Priority",    "#0086fc"),
-            (pri.get("Low",0),            "↓ Low Priority",    "#00995a"),
+            (num_sims,                    "Simulations",       "#6a9cc8"),
+            (unique_paths,                "Unique Paths",      "#6ab0c8"),
+            (stats["answerable"],         "Questions",         "#9888c8"),
+            (total,                       "Total Issues",      ic),
+            (sev_counts.get("Critical",0),"Critical",          "#cc8080"),
+            (sev_counts.get("High",0),    "High",              "#cc9470"),
+            (sev_counts.get("Medium",0),  "Medium",            "#ccb460"),
+            (sev_counts.get("Low",0),     "Low",               "#6aab90"),
+            (len(suggestions),            "Design Suggestions",sc),
+            (pri.get("High",0),           "High Priority",     "#cc9470"),
+            (pri.get("Medium",0),         "Med Priority",      "#ccb460"),
+            (pri.get("Low",0),            "Low Priority",      "#6aab90"),
         ]
         cards = "".join(
             f'<div class="kpi"><div class="kv" style="color:{c}">{v}</div>'
@@ -2852,19 +2688,18 @@ class ReportGenerator:
     def _source_breakdown(self, static_issues, sim_issues):
         total = len(static_issues) + len(sim_issues)
         if total == 0: return ""
-        sp  = len(static_issues) / total * 100
+        sp = len(static_issues) / total * 100
         smp = len(sim_issues) / total * 100
         return (
-            f'<div class="card">'
-            f'<div class="card-eyebrow">Analysis</div><h2>Issue Sources</h2>'
-            f'<div class="sbar"><span class="sbl" style="color:#ff3e00">Static</span>'
-            f'<div class="strk"><div class="sfil" style="width:{sp:.0f}%;background:#ff3e00"></div></div>'
-            f'<span class="scnt" style="color:#ff3e00">{len(static_issues)}</span></div>'
-            f'<div class="sbar"><span class="sbl" style="color:#0090ff">Simulation</span>'
-            f'<div class="strk"><div class="sfil" style="width:{smp:.0f}%;background:#0090ff"></div></div>'
-            f'<span class="scnt" style="color:#0090ff">{len(sim_issues)}</span></div>'
-            f'<p class="sub" style="margin-top:.5rem">Static checks: structural analysis without form execution. '
-            f'Simulation checks: logic issues surfaced by simulating respondent paths.</p>'
+            f'<div class="card"><h2>Issue Sources</h2>'
+            f'<div class="sbar"><span class="sbl" style="color:#6a9cc8">Static</span>'
+            f'<div class="strk"><div class="sfil" style="width:{sp:.0f}%;background:#6a9cc8"></div></div>'
+            f'<span class="scnt" style="color:#6a9cc8">{len(static_issues)}</span></div>'
+            f'<div class="sbar"><span class="sbl" style="color:#9888c8">Simulation</span>'
+            f'<div class="strk"><div class="sfil" style="width:{smp:.0f}%;background:#9888c8"></div></div>'
+            f'<span class="scnt" style="color:#9888c8">{len(sim_issues)}</span></div>'
+            f'<p class="sub" style="margin-top:.5rem">Static checks: structural analysis on form design. '
+            f'Simulation checks: logic issues found by simulating respondent paths.</p>'
             f'</div>\n'
         )
 
@@ -2878,8 +2713,7 @@ class ReportGenerator:
             bars += (f'<div class="sbar"><span class="sbl" style="color:{fg}">{sev}</span>'
                      f'<div class="strk"><div class="sfil" style="width:{pct:.1f}%;background:{fg}"></div></div>'
                      f'<span class="scnt" style="color:{fg}">{cnt}</span></div>')
-        return (f'<div class="card"><div class="card-eyebrow">Overview</div>'
-                f'<h2>Issue Severity Breakdown</h2>{bars}</div>\n')
+        return f'<div class="card"><h2>Issue Severity Breakdown</h2>{bars}</div>\n'
 
     def _path_chart(self, path_lens, num_sims, unique_paths):
         mn, mx = min(path_lens), max(path_lens)
@@ -2898,8 +2732,7 @@ class ReportGenerator:
                      f'<div class="ptrk"><div class="pfil" style="width:{pct:.1f}%"></div></div>'
                      f'<span class="pcnt">{cnt}</span></div>')
         div_pct = unique_paths / num_sims * 100
-        return (f'<div class="card"><div class="card-eyebrow">Simulation</div>'
-                f'<h2>Survey Path Length Distribution</h2>'
+        return (f'<div class="card"><h2>Survey Path Length Distribution</h2>'
                 f'<p class="sub">Min: <strong>{mn}</strong> &nbsp;|&nbsp; '
                 f'Max: <strong>{mx}</strong> &nbsp;|&nbsp; Avg: <strong>{avg:.1f}</strong> '
                 f'questions &nbsp;|&nbsp; Path diversity: <strong>{div_pct:.0f}%</strong></p>'
@@ -2907,7 +2740,7 @@ class ReportGenerator:
 
     def _issues_table(self, issues):
         if not issues:
-            return ('<div class="card"><div class="card-eyebrow">Results</div><h2>Detected Issues</h2>'
+            return ('<div class="card"><h2>Detected Issues</h2>'
                     '<div class="ok"><div class="ok-icon">✓</div>'
                     '<strong>No issues detected.</strong>'
                     '<p>The form passed all quality checks in this category.</p></div></div>\n')
@@ -2957,8 +2790,7 @@ class ReportGenerator:
             )
 
         return (
-            f'<div class="card"><div class="card-eyebrow">Results</div>'
-            f'<h2>Detected Issues — {len(issues)} total · {n_types} problem types</h2>'
+            f'<div class="card"><h2>Detected Issues ({len(issues)} total · {n_types} problem types)</h2>'
             f'<p class="sub">Issues are grouped by type — the <em># Vars</em> column shows how many '
             f'variables share the same problem. Fix one, then apply the same fix to all listed variables.</p>'
             f'<div class="tbl-wrap"><table>'
@@ -2971,9 +2803,9 @@ class ReportGenerator:
 
     def _suggestions_section(self, suggestions: list) -> str:
         _PRI = {
-            "High":   ("#d48f00", "#fff8e6"),
-            "Medium": ("#0086fc", "#eef4ff"),
-            "Low":    ("#00995a", "#e8faf3"),
+            "High":   ("#cc9470", "#fdf5ee"),
+            "Medium": ("#ccb460", "#fdf8e8"),
+            "Low":    ("#6aab90", "#e8f6f0"),
         }
         _ICON = {
             "Reference Integrity":  "🔗", "Choice Logic":        "🔘",
@@ -3052,118 +2884,77 @@ class ReportGenerator:
 
     def _css(self):
         return """<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-:root {
-  --canvas:    #fbfaf9;
-  --stone:     #f2f0ed;
-  --parchment: #f8f7f4;
-  --graphite:  #474645;
-  --charcoal:  #343433;
-  --midnight:  #121212;
-  --ash:       #848281;
-  --fog:       #c6c6c6;
-  --ember:     #ff3e00;
-  --meadow:    #00ca48;
-  --sky:       #0090ff;
-  --coral:     #ff2b3a;
-  --deep-amber:#d48f00;
-  --spearmint: #00c978;
-}
+:root{--primary:#6a9cc8;--pl:#d8eaf8;--bg:#f5f8fc;--card:#fff;
+  --bdr:#e2e8f0;--tx:#1e293b;--mu:#64748b}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-  background:var(--canvas);color:var(--graphite);line-height:1.55;font-size:15px}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:var(--bg);color:var(--tx);line-height:1.6}
 .container{max-width:1100px;margin:0 auto;padding:2rem 1.5rem}
-
-/* Header */
-.header{background:#fff;box-shadow:var(--stone) 0 0 0 1px inset;
-  border-radius:12px;padding:1.75rem 2rem;margin-bottom:1.75rem;
-  display:flex;align-items:center;gap:1.25rem}
-.hicon{font-size:2.2rem;flex-shrink:0}
-.header-text{}
-.header-eyebrow{font-size:.7rem;font-weight:600;text-transform:uppercase;
-  letter-spacing:.08em;color:var(--ember);margin-bottom:.3rem}
-.header h1{font-size:1.5rem;font-weight:700;color:var(--charcoal);
-  letter-spacing:-.4px;line-height:1.2}
-.header p{font-size:.875rem;color:var(--ash);margin-top:.3rem}
-
-/* KPI row */
+.header{display:flex;align-items:center;gap:1.1rem;
+  background:linear-gradient(135deg,#6a9cc8 0%,#7aacdc 100%);
+  color:#fff;padding:1.75rem 2rem;border-radius:12px;margin-bottom:1.75rem}
+.hicon{font-size:2.4rem}
+.header h1{font-size:1.6rem;font-weight:800}
+.header p{opacity:.82;font-size:.84rem;margin-top:.15rem}
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
-  gap:.75rem;margin-bottom:1.5rem}
-.kpi{background:#fff;box-shadow:var(--stone) 0 0 0 1px inset;
-  border-radius:10px;padding:1rem 1.1rem;text-align:center}
-.kv{font-size:1.85rem;font-weight:700;color:var(--charcoal);letter-spacing:-.5px}
+  gap:.9rem;margin-bottom:1.5rem}
+.kpi{background:var(--card);border:1px solid var(--bdr);border-radius:10px;
+  padding:1rem;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.kv{font-size:1.9rem;font-weight:800}
 .kl{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;
-  color:var(--ash);margin-top:.2rem;font-weight:500}
-
-/* Section cards */
-.card{background:#fff;box-shadow:var(--stone) 0 0 0 1px inset;
-  border-radius:10px;padding:1.5rem;margin-bottom:1.25rem}
-.card-eyebrow{font-size:.7rem;font-weight:600;text-transform:uppercase;
-  letter-spacing:.08em;color:var(--ember);margin-bottom:.4rem}
-.card h2{font-size:1rem;font-weight:700;color:var(--charcoal);
-  margin-bottom:.75rem;letter-spacing:-.2px}
-.sub{font-size:.84rem;color:var(--ash);margin-bottom:1rem;line-height:1.55}
-
-/* Bars */
-.sbar,.pbar{display:flex;align-items:center;gap:.75rem;margin-bottom:.55rem}
-.sbl,.pbl{width:80px;font-weight:600;font-size:.84rem;text-align:right;
-  flex-shrink:0;color:var(--charcoal)}
-.strk,.ptrk{flex:1;background:var(--parchment);border-radius:4px;
-  height:18px;overflow:hidden}
+  color:var(--mu);margin-top:.2rem}
+.card{background:var(--card);border:1px solid var(--bdr);border-radius:10px;
+  padding:1.5rem;margin-bottom:1.5rem;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.card h2{font-size:1.05rem;font-weight:700;color:var(--primary);
+  margin-bottom:1rem;padding-bottom:.5rem;border-bottom:2px solid var(--pl)}
+.sub{font-size:.84rem;color:var(--mu);margin-bottom:1rem}
+.sbar,.pbar{display:flex;align-items:center;gap:.75rem;margin-bottom:.6rem}
+.sbl,.pbl{width:80px;font-weight:600;font-size:.84rem;text-align:right;flex-shrink:0}
+.strk,.ptrk{flex:1;background:#f1f5f9;border-radius:4px;height:20px;overflow:hidden}
 .sfil,.pfil{height:100%;border-radius:4px;min-width:2px}
-.pfil{background:var(--ember)}
-.scnt,.pcnt{width:40px;font-weight:700;font-size:.84rem;
-  flex-shrink:0;color:var(--charcoal)}
-
-/* Tables */
+.pfil{background:#7aa4cc}
+.scnt,.pcnt{width:40px;font-weight:700;font-size:.84rem;flex-shrink:0}
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:.84rem}
-th{background:var(--parchment);text-align:left;padding:.5rem .75rem;font-weight:600;
-  color:var(--ash);text-transform:uppercase;letter-spacing:.05em;
-  font-size:.68rem;border-bottom:1px solid var(--stone)}
-td{padding:.6rem .75rem;border-bottom:1px solid var(--stone);
-  vertical-align:top;color:var(--graphite)}
+th{background:#f1f5f9;text-align:left;padding:.55rem .75rem;font-weight:600;
+  color:var(--mu);text-transform:uppercase;letter-spacing:.04em;
+  font-size:.7rem;border-bottom:2px solid var(--bdr)}
+td{padding:.6rem .75rem;border-bottom:1px solid var(--bdr);vertical-align:top}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:var(--parchment)}
-td.num{color:var(--ash);font-size:.76rem;text-align:center;width:28px}
+tr:hover td{background:#f8fafc}
+td.num{color:var(--mu);font-size:.76rem;text-align:center;width:28px}
 .badge{display:inline-block;padding:.2rem .55rem;border-radius:20px;
-  font-size:.68rem;font-weight:700;white-space:nowrap}
-code.qn{font-family:"SF Mono","Fira Code",monospace;background:var(--parchment);
-  padding:.12rem .38rem;border-radius:4px;font-size:.78rem;color:var(--charcoal)}
-.fix{color:var(--ash);font-size:.8rem;margin-top:.35rem;line-height:1.5}
-.src-badge{display:inline-block;font-size:.63rem;font-weight:600;
-  padding:.1rem .4rem;border-radius:4px;margin-top:.25rem}
-.src-static{background:#fff0ec;color:var(--ember)}
-.src-sim{background:#eef4ff;color:var(--sky)}
-
-/* OK state */
-.ok{text-align:center;padding:2.5rem 1rem;color:var(--ash)}
-.ok-icon{font-size:2rem;color:var(--meadow)}
-.ok strong{color:var(--charcoal);font-size:1rem;display:block;margin:.4rem 0}
-
-/* Footer */
-.foot{text-align:center;color:var(--fog);font-size:.75rem;
-  margin-top:2rem;padding-top:1rem;border-top:1px solid var(--stone)}
-
-/* Design suggestions */
+  font-size:.7rem;font-weight:700;white-space:nowrap}
+code.qn{font-family:"SF Mono","Fira Code",monospace;background:#f1f5f9;
+  padding:.15rem .4rem;border-radius:4px;font-size:.79rem}
+.fix{color:var(--mu);font-size:.81rem;margin-top:.35rem}
+.src-badge{display:inline-block;font-size:.65rem;font-weight:600;padding:.1rem .4rem;
+  border-radius:4px;margin-top:.25rem}
+.src-static{background:#e8f2fc;color:#6a9cc8}
+.src-sim{background:#f2eefc;color:#9888c8}
+.ok{text-align:center;padding:3rem 1rem;color:var(--mu)}
+.ok-icon{font-size:2.5rem;color:#6aab90}
+.ok strong{color:#6aab90;font-size:1.1rem;display:block;margin:.5rem 0}
+.foot{text-align:center;color:var(--mu);font-size:.76rem;
+  margin-top:2rem;padding-top:1rem;border-top:1px solid var(--bdr)}
+/* ── Design suggestions ── */
 .sug-cat{margin-bottom:1.2rem}
-.sug-cat-hdr{font-weight:600;font-size:.85rem;color:var(--charcoal);
-  padding:.35rem 0;margin-bottom:.5rem;
-  border-bottom:1px solid var(--stone);display:flex;align-items:center;gap:.5rem}
-.sug-cat-count{margin-left:auto;background:var(--parchment);color:var(--ash);
-  font-size:.68rem;font-weight:700;padding:.1rem .45rem;border-radius:10px}
-.sug-card{border:1px solid var(--stone);border-left:4px solid #ccc;
-  border-radius:10px;padding:.85rem 1rem;margin-bottom:.6rem;background:#fff}
+.sug-cat-hdr{font-weight:700;font-size:.88rem;color:var(--primary);
+  padding:.4rem 0 .4rem 0;margin-bottom:.5rem;
+  border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:.5rem}
+.sug-cat-count{margin-left:auto;background:var(--pl);color:var(--primary);
+  font-size:.7rem;font-weight:700;padding:.1rem .45rem;border-radius:10px}
+.sug-card{border:1px solid #e2e8f0;border-left:4px solid #ccc;
+  border-radius:6px;padding:.75rem 1rem;margin-bottom:.6rem}
 .sug-head{display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem}
-.sug-title{font-weight:600;font-size:.87rem;line-height:1.4;color:var(--charcoal)}
-.sug-pri{font-size:.65rem;font-weight:700;padding:.2rem .5rem;
-  border-radius:20px;white-space:nowrap;flex-shrink:0}
-.sug-desc{font-size:.84rem;color:var(--graphite);margin-top:.35rem;line-height:1.55}
-.sug-action{font-size:.81rem;color:var(--ash);margin-top:.4rem}
-.sug-ex{margin-top:.45rem;background:var(--parchment);padding:.45rem .75rem;
-  border-radius:6px;font-family:"SF Mono","Fira Code",monospace;
-  font-size:.79rem;color:var(--charcoal);white-space:pre-wrap;word-break:break-all;
-  border-left:2px solid var(--stone)}
+.sug-title{font-weight:700;font-size:.87rem;line-height:1.4}
+.sug-pri{font-size:.67rem;font-weight:700;padding:.2rem .5rem;border-radius:10px;
+  white-space:nowrap;flex-shrink:0}
+.sug-desc{font-size:.84rem;color:#334155;margin-top:.35rem;line-height:1.55}
+.sug-action{font-size:.82rem;color:var(--mu);margin-top:.4rem}
+.sug-ex{margin-top:.45rem;background:#f1f5f9;padding:.35rem .65rem;
+  border-radius:5px;font-family:"SF Mono","Fira Code",monospace;
+  font-size:.8rem;color:#1e293b;white-space:pre-wrap;word-break:break-all}
 .sug-vars{margin-top:.4rem}
 </style>"""
 
@@ -3173,12 +2964,11 @@ code.qn{font-family:"SF Mono","Fira Code",monospace;background:var(--parchment);
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _sev_badge(sev: str) -> str:
-    # Family palette severity colours
     colours = {
-        "Critical": "background:#fff0f1;color:#ff2b3a;font-weight:700",
-        "High":     "background:#fff8e6;color:#d48f00;font-weight:700",
-        "Medium":   "background:#eef4ff;color:#0086fc;font-weight:700",
-        "Low":      "background:#e8faf3;color:#00995a;font-weight:700",
+        "Critical": "background:#fdf0f0;color:#cc8080;font-weight:700",
+        "High":     "background:#fdf5ee;color:#cc9470;font-weight:700",
+        "Medium":   "background:#fdf8e8;color:#ccb460;font-weight:700",
+        "Low":      "background:#e8f6f0;color:#6aab90;font-weight:700",
     }
     return colours.get(sev, "")
 
@@ -3190,10 +2980,10 @@ def _show_issue_table(issues: list, key_suffix: str = ""):
         return
 
     SEV_COLOR = {
-        "Critical": ("#ff2b3a", "#fff0f1"),
-        "High":     ("#d48f00", "#fff8e6"),
-        "Medium":   ("#0086fc", "#eef4ff"),
-        "Low":      ("#00995a", "#e8faf3"),
+        "Critical": ("#cc8080", "#fdf0f0"),
+        "High":     ("#cc9470", "#fdf5ee"),
+        "Medium":   ("#ccb460", "#fdf8e8"),
+        "Low":      ("#6aab90", "#e8f6f0"),
     }
     SEV_ORD = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
     MAX_VARS = 6   # variables shown inline before "+N more"
@@ -3270,76 +3060,44 @@ def _show_issue_table(issues: list, key_suffix: str = ""):
 
 def _show_landing():
     st.markdown("""
-<div style="background:#fff;box-shadow:#f2f0ed 0 0 0 1px inset;
-  border-radius:12px;padding:2rem 2.25rem;margin-bottom:1.75rem">
-  <p style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;
-    color:#ff3e00;margin:0 0 .5rem 0">Ready to analyse</p>
-  <h2 style="margin:0 0 .6rem 0;font-size:1.25rem;font-weight:700;
-    color:#343433;letter-spacing:-.3px">
-    Upload an XLSForm (.xlsx) to begin</h2>
-  <p style="margin:0;font-size:.875rem;color:#474645;line-height:1.55;max-width:560px">
-    The file must contain a <code style="background:#f8f7f4;padding:.1rem .35rem;
-    border-radius:4px;font-size:.82rem;color:#343433">survey</code> sheet with
-    <code style="background:#f8f7f4;padding:.1rem .35rem;border-radius:4px;
-    font-size:.82rem;color:#343433">type</code> and
-    <code style="background:#f8f7f4;padding:.1rem .35rem;border-radius:4px;
-    font-size:.82rem;color:#343433">name</code> columns.
-    A <code style="background:#f8f7f4;padding:.1rem .35rem;border-radius:4px;
-    font-size:.82rem;color:#343433">choices</code> sheet is required for
-    select-type questions.</p>
+<div style="background:linear-gradient(135deg,#6a9cc8,#7aacdc);color:white;
+  padding:2rem;border-radius:12px;margin-bottom:1.5rem">
+  <h2 style="margin:0 0 .5rem 0">Upload an XLSForm (.xlsx) to begin analysis</h2>
+  <p style="opacity:.85;margin:0">The file must contain a <code>survey</code> sheet with
+  <code>type</code> and <code>name</code> columns. A <code>choices</code> sheet is required
+  for select-type questions.</p>
 </div>
 """, unsafe_allow_html=True)
-
     c1, c2, c3 = st.columns(3)
-    _card_style = (
-        "background:#fff;box-shadow:#f2f0ed 0 0 0 1px inset;"
-        "border-radius:10px;padding:1.4rem 1.5rem;height:100%"
-    )
     with c1:
-        st.markdown(f"""
-<div style="{_card_style}">
-  <p style="font-size:.72rem;font-weight:600;text-transform:uppercase;
-    letter-spacing:.07em;color:#ff3e00;margin:0 0 .5rem 0">🔬 Structural Checks</p>
-  <p style="font-size:.72rem;color:#848281;margin:0 0 .75rem 0">World Bank DIME + IPA</p>
-  <ul style="margin:0;padding-left:1.1rem;color:#474645;font-size:.84rem;line-height:1.8">
-    <li>Group begin/end structure validation</li>
-    <li>Duplicate and missing choice codes</li>
-    <li>Field name length (Stata &amp; SurveyCTO)</li>
-    <li>Outdated syntax and or_other usage</li>
-    <li>Missing metadata and recommended columns</li>
-    <li>Disabled and read-only field flags</li>
-    <li>Constraint contradiction detection</li>
-  </ul>
-</div>""", unsafe_allow_html=True)
+        st.markdown("**Structural Checks** *(World Bank DIME + IPA)*")
+        st.markdown("""
+- Group begin/end structure validation
+- Duplicate and missing choice codes
+- Field name length (Stata & SurveyCTO limits)
+- Outdated syntax and or_other usage
+- Missing metadata and recommended columns
+- Disabled and read-only field flags
+- Constraint contradiction detection
+""")
     with c2:
-        st.markdown(f"""
-<div style="{_card_style}">
-  <p style="font-size:.72rem;font-weight:600;text-transform:uppercase;
-    letter-spacing:.07em;color:#ff3e00;margin:0 0 .5rem 0">🎲 Simulation Checks</p>
-  <p style="font-size:.72rem;color:#848281;margin:0 0 .75rem 0">Respondent path engine</p>
-  <ul style="margin:0;padding-left:1.1rem;color:#474645;font-size:.84rem;line-height:1.8">
-    <li>Unreachable questions</li>
-    <li>Circular relevance dependencies</li>
-    <li>Deep skip chains (exceeding threshold)</li>
-    <li>Required questions that cannot be answered</li>
-    <li>Questions rarely reached across simulations</li>
-  </ul>
-</div>""", unsafe_allow_html=True)
+        st.markdown("**Simulation-Based Checks**")
+        st.markdown("""
+- Unreachable questions
+- Circular relevance dependencies
+- Deep skip chains (exceeding threshold)
+- Required questions that cannot be answered
+- Questions rarely reached across simulations
+""")
     with c3:
-        st.markdown(f"""
-<div style="{_card_style}">
-  <p style="font-size:.72rem;font-weight:600;text-transform:uppercase;
-    letter-spacing:.07em;color:#ff3e00;margin:0 0 .5rem 0">💾 Exported Report</p>
-  <p style="font-size:.72rem;color:#848281;margin:0 0 .75rem 0">HTML · open in any browser</p>
-  <ul style="margin:0;padding-left:1.1rem;color:#474645;font-size:.84rem;line-height:1.8">
-    <li>Summary metrics dashboard</li>
-    <li>Structural vs. simulation breakdown</li>
-    <li>Severity distribution chart</li>
-    <li>Response pathway diversity analysis</li>
-    <li>Issues table with remediation guidance</li>
-    <li>Design improvement suggestions</li>
-  </ul>
-</div>""", unsafe_allow_html=True)
+        st.markdown("**Exported Report Includes**")
+        st.markdown("""
+- Summary metrics dashboard
+- Structural vs. simulation issue breakdown
+- Severity distribution chart
+- Response pathway diversity analysis
+- Comprehensive issues table with remediation guidance
+""")
 
 
 def main():
