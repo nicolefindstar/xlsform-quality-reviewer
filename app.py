@@ -93,35 +93,33 @@ p, .stMarkdown p, .stMarkdown li { color: var(--graphite) !important; font-size:
   letter-spacing: .06em !important; color: var(--ash) !important; font-weight: 500 !important;
 }
 
-/* ── Primary button (pill dark) ────────────────────────────────── */
-.stButton > button,
-button[kind="primary"] {
+/* ── All buttons (pill light) ──────────────────────────────────── */
+.stButton > button {
   font-family: 'Inter', sans-serif !important;
   font-size: .875rem !important; font-weight: 500 !important;
   border-radius: 32px !important;
   padding: .45rem 1.25rem !important;
-  transition: background .2s ease, color .2s ease !important;
-}
-.stButton > button[kind="primary"] {
-  background: var(--midnight) !important; color: #fff !important; border: none !important;
-}
-.stButton > button[kind="primary"]:hover { background: var(--charcoal) !important; }
-.stButton > button[kind="secondary"] {
-  background: var(--parchment) !important; color: var(--charcoal) !important;
+  background: var(--parchment) !important;
+  color: var(--charcoal) !important;
   border: 1px solid var(--stone) !important;
+  transition: background .2s ease, border-color .2s ease !important;
 }
-.stButton > button[kind="secondary"]:hover { background: var(--stone) !important; }
+.stButton > button:hover {
+  background: var(--stone) !important; border-color: var(--ash) !important;
+}
 
-/* ── Download button (pill dark) ───────────────────────────────── */
+/* ── Download button (pill light) ───────────────────────────────── */
 [data-testid="stDownloadButton"] button {
-  background: var(--midnight) !important; color: #fff !important;
-  border: none !important; border-radius: 32px !important;
+  background: var(--parchment) !important; color: var(--charcoal) !important;
+  border: 1px solid var(--stone) !important; border-radius: 32px !important;
   font-family: 'Inter', sans-serif !important;
   font-weight: 500 !important; font-size: .875rem !important;
   padding: .5rem 1.5rem !important; width: 100% !important;
-  transition: background .2s ease !important;
+  transition: background .2s ease, border-color .2s ease !important;
 }
-[data-testid="stDownloadButton"] button:hover { background: var(--charcoal) !important; }
+[data-testid="stDownloadButton"] button:hover {
+  background: var(--stone) !important; border-color: var(--ash) !important;
+}
 
 /* ── File uploader ─────────────────────────────────────────────── */
 [data-testid="stFileUploaderDropzone"] {
